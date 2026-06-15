@@ -51,6 +51,8 @@ testBoostMovesUpToTwoTilesPerGo();
 testOverloadStatusDurationAndExpiry();
 testOverloadFireCreatesTwoBulletsAndExpires();
 testVisibleBulletCanExposeOverloadSpreadBullet();
+testEnemyBulletVisibilityUsesForwardCone();
+testEnemyBulletVisibilityIsBlockedByTerrain();
 testSeededStarSpawnIsDeterministic();
 testDefaultStarCollectionDoesNotEndMatch();
 testConfiguredWinningStarDoesNotSpawnReplacement();
@@ -707,8 +709,10 @@ function testOverloadFireCreatesTwoBulletsAndExpires() {
 }
 
 function testVisibleBulletCanExposeOverloadSpreadBullet() {
+  const map = openMap(10, 7);
+  map[4][1] = "x";
   const sim = new AgenTankSimulator({
-    map: openMap(10, 7),
+    map,
     tanks: [
       { id: "a", position: [1, 1], direction: "right", skillType: "overload" },
       { id: "b", position: [7, 2], direction: "left", skillType: "cloak" }
@@ -717,6 +721,42 @@ function testVisibleBulletCanExposeOverloadSpreadBullet() {
   sim.step([{ type: "overload" }, null]);
   sim.step([{ type: "fire" }, null]);
   assert.deepEqual(sim.snapshotFor(1).enemy.bullet.position, [3, 2]);
+}
+
+function testEnemyBulletVisibilityUsesForwardCone() {
+  assert.deepEqual(visibleEnemyBulletSnapshot("up", [5, 2]), [5, 2], "straight ahead should be visible");
+  assert.deepEqual(visibleEnemyBulletSnapshot("up", [3, 3]), [3, 3], "left 45 degree boundary should be visible");
+  assert.deepEqual(visibleEnemyBulletSnapshot("up", [7, 3]), [7, 3], "right 45 degree boundary should be visible");
+  assert.equal(visibleEnemyBulletSnapshot("up", [2, 4]), null, "outside the 90 degree cone should be hidden");
+  assert.equal(visibleEnemyBulletSnapshot("up", [5, 7]), null, "behind the observer should be hidden");
+  assert.equal(visibleEnemyBulletSnapshot("up", [2, 5]), null, "same-row side bullets should be hidden");
+
+  assert.deepEqual(visibleEnemyBulletSnapshot("right", [8, 2]), [8, 2], "rotated cone boundary should be visible");
+  assert.equal(visibleEnemyBulletSnapshot("right", [4, 5]), null, "rotated cone should still hide behind bullets");
+}
+
+function testEnemyBulletVisibilityIsBlockedByTerrain() {
+  assert.deepEqual(visibleEnemyBulletSnapshot("right", [8, 5]), [8, 5], "open line should expose bullets inside the cone");
+  assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "x"]] }), null, "stone blocks bullet sight");
+  assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "m"]] }), null, "dirt blocks bullet sight");
+  assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "o"]] }), null, "grass blocks bullet sight");
+}
+
+function visibleEnemyBulletSnapshot(direction, bulletPosition, options = {}) {
+  const map = openMap(11, 11);
+  for (const [x, y, terrain] of options.terrain || []) {
+    map[x][y] = terrain;
+  }
+  const sim = new AgenTankSimulator({
+    map,
+    tanks: [
+      { id: "a", position: [5, 5], direction, skillType: "teleport" },
+      { id: "b", position: [9, 9], direction: "left", skillType: "overload" }
+    ]
+  });
+  sim.bullets.push({ objectId: "enemy-shot", ownerIndex: 1, ownerObjectId: "b", position: bulletPosition, direction: "left", crashed: false });
+  const bullet = sim.snapshotFor(0).enemy.bullet;
+  return bullet ? bullet.position : null;
 }
 
 function testSeededStarSpawnIsDeterministic() {

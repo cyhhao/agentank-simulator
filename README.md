@@ -326,7 +326,7 @@ Bullets and firing:
 - A tank cannot fire another normal bullet while its previous bullet is still active.
 - Bullets can hit walls, dirt, tanks, and shielded tanks.
 - Dirt is destroyed when hit.
-- Enemy bullets are only visible through current line of sight.
+- Enemy bullets are only visible inside the observer's forward 90-degree vision cone, and stone, dirt, and grass block that bullet sight.
 
 Stars and results:
 
