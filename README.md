@@ -1,5 +1,7 @@
 # AgenTank Simulator
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 High-fidelity local simulator for AgenTank bot matches. This package is split out from the local `agentank-lab` workflow so the simulator can be tested, reused, and published independently from tank strategy experiments.
 
 The simulator mirrors the public replay/event shape closely enough for local regression gates, bot-vs-bot rollouts, and rule validation. It is not an official server implementation.
