@@ -18,7 +18,9 @@
   },
   "files": [
     "bin/",
+    "examples/",
     "src/",
+    "test/",
     "README.md",
     "LICENSE"
   ],
