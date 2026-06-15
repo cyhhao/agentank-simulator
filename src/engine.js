@@ -122,7 +122,7 @@ export class AgenTankSimulator {
   visibleBulletFor(player, observer) {
     for (const bullet of this.bullets) {
       if (bullet.ownerIndex !== player.index || bullet.crashed) continue;
-      if (player === observer || sameAxis(observer.position, bullet.position) && clearLine(this.map, observer.position, bullet.position)) {
+      if (player === observer || visibleEnemyBullet(this.map, observer, bullet)) {
         return { position: bullet.position.slice(), direction: bullet.direction };
       }
     }
@@ -921,22 +921,79 @@ function publicPlayerState(player, frame = 0) {
   };
 }
 
-function sameAxis(a, b) {
-  return a && b && (a[0] === b[0] || a[1] === b[1]);
+function visibleEnemyBullet(map, observer, bullet) {
+  return inForwardVisionCone(observer.position, observer.direction, bullet.position) &&
+    clearBulletSight(map, observer.position, bullet.position);
 }
 
-function clearLine(map, a, b) {
-  if (!sameAxis(a, b)) return false;
-  const dx = Math.sign(b[0] - a[0]);
-  const dy = Math.sign(b[1] - a[1]);
-  let x = a[0] + dx;
-  let y = a[1] + dy;
-  while (x !== b[0] || y !== b[1]) {
-    if (blocksProjectile(map, x, y)) return false;
-    x += dx;
-    y += dy;
+function inForwardVisionCone(origin, direction, target) {
+  if (!origin || !target) return false;
+  const dx = target[0] - origin[0];
+  const dy = target[1] - origin[1];
+  if (dx === 0 && dy === 0) return true;
+  if (direction === "up") return dy < 0 && Math.abs(dx) <= -dy;
+  if (direction === "right") return dx > 0 && Math.abs(dy) <= dx;
+  if (direction === "down") return dy > 0 && Math.abs(dx) <= dy;
+  if (direction === "left") return dx < 0 && Math.abs(dy) <= -dx;
+  return false;
+}
+
+function clearBulletSight(map, a, b) {
+  if (!a || !b) return false;
+  for (const [x, y] of gridLineCells(a, b)) {
+    if (blocksBulletSight(map, x, y)) return false;
   }
   return true;
+}
+
+function gridLineCells(a, b) {
+  const cells = [];
+  const minX = Math.min(a[0], b[0]);
+  const maxX = Math.max(a[0], b[0]);
+  const minY = Math.min(a[1], b[1]);
+  const maxY = Math.max(a[1], b[1]);
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      if (x === a[0] && y === a[1]) continue;
+      if (segmentIntersectsCell(a, b, x, y)) cells.push([x, y]);
+    }
+  }
+
+  return cells.sort((left, right) => {
+    const leftDistance = (left[0] - a[0]) ** 2 + (left[1] - a[1]) ** 2;
+    const rightDistance = (right[0] - a[0]) ** 2 + (right[1] - a[1]) ** 2;
+    return leftDistance - rightDistance;
+  });
+}
+
+function segmentIntersectsCell(a, b, x, y) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const xMin = x - 0.5;
+  const xMax = x + 0.5;
+  const yMin = y - 0.5;
+  const yMax = y + 0.5;
+  let tMin = 0;
+  let tMax = 1;
+
+  const clipAxis = (start, delta, min, max) => {
+    if (delta === 0) return start >= min && start <= max;
+    const first = (min - start) / delta;
+    const second = (max - start) / delta;
+    tMin = Math.max(tMin, Math.min(first, second));
+    tMax = Math.min(tMax, Math.max(first, second));
+    return tMin <= tMax;
+  };
+
+  return clipAxis(a[0], dx, xMin, xMax) &&
+    clipAxis(a[1], dy, yMin, yMax) &&
+    tMax - tMin > 1e-9;
+}
+
+function blocksBulletSight(map, x, y) {
+  const terrain = terrainAt(map, x, y);
+  return terrain === "x" || terrain === "m" || terrain === "o";
 }
 
 function manhattan(a, b) {
