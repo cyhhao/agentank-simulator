@@ -1,0 +1,39 @@
+{
+  "name": "agentank-simulator",
+  "version": "0.1.0",
+  "description": "High-fidelity local simulator for AgenTank bot matches.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "bin": {
+    "agentank-simulate-local": "./bin/simulate-local.mjs"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./bot-runner": "./src/bot-runner.js",
+    "./constants": "./src/constants.js",
+    "./engine": "./src/engine.js",
+    "./isolated-bot-runner": "./src/isolated-bot-runner.js",
+    "./map": "./src/map.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/check-simulator.mjs",
+    "simulate": "node bin/simulate-local.mjs"
+  },
+  "keywords": [
+    "agentank",
+    "bot",
+    "game-ai",
+    "simulator",
+    "tank"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
