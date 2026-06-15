@@ -948,41 +948,47 @@ function clearBulletSight(map, a, b) {
 
 function gridLineCells(a, b) {
   const cells = [];
-  let x = a[0];
-  let y = a[1];
-  const targetX = b[0];
-  const targetY = b[1];
-  const dx = Math.abs(targetX - x);
-  const dy = Math.abs(targetY - y);
-  const sx = Math.sign(targetX - x);
-  const sy = Math.sign(targetY - y);
+  const minX = Math.min(a[0], b[0]);
+  const maxX = Math.max(a[0], b[0]);
+  const minY = Math.min(a[1], b[1]);
+  const maxY = Math.max(a[1], b[1]);
 
-  if (dx === 0 && dy === 0) return cells;
-  if (dx >= dy) {
-    let error = dx / 2;
-    while (x !== targetX) {
-      x += sx;
-      error -= dy;
-      if (error < 0) {
-        y += sy;
-        error += dx;
-      }
-      cells.push([x, y]);
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      if (x === a[0] && y === a[1]) continue;
+      if (segmentIntersectsCell(a, b, x, y)) cells.push([x, y]);
     }
-    return cells;
   }
 
-  let error = dy / 2;
-  while (y !== targetY) {
-    y += sy;
-    error -= dx;
-    if (error < 0) {
-      x += sx;
-      error += dy;
-    }
-    cells.push([x, y]);
-  }
-  return cells;
+  return cells.sort((left, right) => {
+    const leftDistance = (left[0] - a[0]) ** 2 + (left[1] - a[1]) ** 2;
+    const rightDistance = (right[0] - a[0]) ** 2 + (right[1] - a[1]) ** 2;
+    return leftDistance - rightDistance;
+  });
+}
+
+function segmentIntersectsCell(a, b, x, y) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const xMin = x - 0.5;
+  const xMax = x + 0.5;
+  const yMin = y - 0.5;
+  const yMax = y + 0.5;
+  let tMin = 0;
+  let tMax = 1;
+
+  const clipAxis = (start, delta, min, max) => {
+    if (delta === 0) return start >= min && start <= max;
+    const first = (min - start) / delta;
+    const second = (max - start) / delta;
+    tMin = Math.max(tMin, Math.min(first, second));
+    tMax = Math.min(tMax, Math.max(first, second));
+    return tMin <= tMax;
+  };
+
+  return clipAxis(a[0], dx, xMin, xMax) &&
+    clipAxis(a[1], dy, yMin, yMax) &&
+    tMax - tMin > 1e-9;
 }
 
 function blocksBulletSight(map, x, y) {

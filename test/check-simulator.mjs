@@ -740,6 +740,7 @@ function testEnemyBulletVisibilityIsBlockedByTerrain() {
   assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "x"]] }), null, "stone blocks bullet sight");
   assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "m"]] }), null, "dirt blocks bullet sight");
   assert.equal(visibleEnemyBulletSnapshot("right", [8, 5], { terrain: [[6, 5, "o"]] }), null, "grass blocks bullet sight");
+  assert.equal(visibleEnemyBulletSnapshot("right", [8, 7], { terrain: [[6, 5, "x"]] }), null, "off-axis sight checks every crossed cell");
 }
 
 function visibleEnemyBulletSnapshot(direction, bulletPosition, options = {}) {
