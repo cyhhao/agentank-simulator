@@ -4,7 +4,17 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AgenTankSimulator, IsolatedBotRunner, loadBotFromCode, loadIsolatedBotFromFile, mapFromRows, openMap, parseRawMap } from "../src/index.js";
+import {
+  AgenTankSimulator,
+  IsolatedBotRunner,
+  createRandomScenario,
+  loadBotFromCode,
+  loadIsolatedBotFromFile,
+  mapFromRows,
+  openMap,
+  parseRawMap,
+  serializeRawMap
+} from "../src/index.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SIMULATE_LOCAL_CLI = fileURLToPath(new URL("../bin/simulate-local.mjs", import.meta.url));
@@ -49,8 +59,10 @@ testDoubleKillTieBreaksByRuntimeWhenStarsTie();
 testCrashResultIsNotOverriddenByStarLimit();
 testStarProviderSeesCurrentPlayerStatus();
 testRawMapParsingKeepsStartsAndTerrain();
+testRandomScenarioGenerationIsSeeded();
 testSimulatorRejectsMapsWithMissingTankStart();
 testSimulateLocalPassesConfiguredBotTimeout();
+testSimulateLocalRandomMapMode();
 await testIsolatedBotRunnerBlocksHostFileAccess();
 await testIsolatedBotRunnerClosesWorkerAfterInitError();
 
@@ -849,6 +861,17 @@ function testRawMapParsingKeepsStartsAndTerrain() {
   assert.deepEqual(mapFromRows(["xxx", "x.x", "xxx"])[1][1], ".");
 }
 
+function testRandomScenarioGenerationIsSeeded() {
+  const first = createRandomScenario({ width: 11, height: 9, seed: 42 });
+  const second = createRandomScenario({ width: 11, height: 9, seed: 42 });
+  assert.equal(serializeRawMap(first.map, first.tanks), serializeRawMap(second.map, second.tanks));
+  assert.deepEqual(first.star, second.star);
+  assert.equal(first.tanks.length, 2);
+  assert.equal(first.map.length, 11);
+  assert.equal(first.map[0].length, 9);
+  assert.notDeepEqual(first.tanks[0].position, first.tanks[1].position);
+}
+
 function testSimulatorRejectsMapsWithMissingTankStart() {
   assert.throws(
     () => new AgenTankSimulator({ map: "xxx|xAx|xxx" }),
@@ -893,6 +916,36 @@ function testSimulateLocalPassesConfiguredBotTimeout() {
     assert.equal(completed.status, 0);
     replay = JSON.parse(readFileSync(replayFile, "utf8"));
     assert.equal(replay.replayData.replay.records[0].some((event) => event.type === "tank" && event.action === "go"), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function testSimulateLocalRandomMapMode() {
+  const dir = mkdtempSync(join(tmpdir(), "agentank-random-sim-"));
+  try {
+    const bot = join(dir, "bot.js");
+    const replayFile = join(dir, "nested", "replay.json");
+    writeFileSync(bot, "function onIdle(me) { me.go(); }");
+    const result = spawnSync(process.execPath, [
+      SIMULATE_LOCAL_CLI,
+      "--bot-a", bot,
+      "--bot-b", bot,
+      "--random-map",
+      "--width", "11",
+      "--height", "9",
+      "--seed", "42",
+      "--max-frames", "2",
+      "--out", replayFile
+    ], {
+      cwd: PACKAGE_ROOT,
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /map=/);
+    assert.match(result.stdout, /star=/);
+    const replay = JSON.parse(readFileSync(replayFile, "utf8"));
+    assert.equal(replay.replayData.replay.records.length, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

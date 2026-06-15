@@ -2,6 +2,12 @@ export { AgenTankSimulator } from "./engine.js";
 export { loadBotFromCode, loadBotFromFile, BotRunner } from "./bot-runner.js";
 export { loadIsolatedBotFromFile, IsolatedBotRunner } from "./isolated-bot-runner.js";
 export {
+  createRandomScenario,
+  fillRandomTerrain,
+  seededRandom,
+  serializeRawMap
+} from "./random-map.js";
+export {
   cloneMap,
   mapFromRows,
   openMap,

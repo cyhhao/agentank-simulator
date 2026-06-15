@@ -14,7 +14,8 @@
     "./constants": "./src/constants.js",
     "./engine": "./src/engine.js",
     "./isolated-bot-runner": "./src/isolated-bot-runner.js",
-    "./map": "./src/map.js"
+    "./map": "./src/map.js",
+    "./random-map": "./src/random-map.js"
   },
   "files": [
     "bin/",
