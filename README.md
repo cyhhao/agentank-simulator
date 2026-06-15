@@ -4,6 +4,8 @@ High-fidelity local simulator for AgenTank bot matches. This package is split ou
 
 The simulator mirrors the public replay/event shape closely enough for local regression gates, bot-vs-bot rollouts, and rule validation. It is not an official server implementation.
 
+When this package is checked out inside `agentank-lab`, this directory is the canonical simulator source. The lab's old `src/simulator/` files are compatibility re-exports only.
+
 ## Install
 
 ```bash
