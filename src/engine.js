@@ -24,6 +24,12 @@ import {
   terrainAt
 } from "./map.js";
 
+// 2026-06-18 teleport landing visibility: after a successful teleport, the landing spot is
+// briefly revealed to the enemy script even in grass (so grass ambushes have a readable
+// counterplay window). Duration is "briefly" on the platform; we model one enemy decision
+// frame, which is all the opponent needs to read the position. Tune if platform data differs.
+const TELEPORT_REVEAL_FRAMES = 1;
+
 export class AgenTankSimulator {
   constructor(options = {}) {
     const parsed = typeof options.map === "string" ? parseRawMap(options.map) : normalizeMap(options.map || []);
@@ -108,8 +114,14 @@ export class AgenTankSimulator {
 
   visibleTankFor(player, observer) {
     if (!player || player.crashed) return null;
-    if (player !== observer && (player.effects.self?.type === "cloak" || isGrass(this.map, player.position[0], player.position[1]))) {
+    if (player !== observer && player.effects.self?.type === "cloak") {
       return null;
+    }
+    if (player !== observer && isGrass(this.map, player.position[0], player.position[1])) {
+      // Teleport landing visibility (2026-06-18): a successful teleport briefly reveals the
+      // landing spot to the enemy even in grass; otherwise grass hides the tank as before.
+      const revealed = player.teleportRevealUntil != null && this.frame <= player.teleportRevealUntil;
+      if (!revealed) return null;
     }
     return {
       id: player.objectId,
@@ -439,6 +451,7 @@ export class AgenTankSimulator {
       if (!target) return;
       const from = player.position.slice();
       player.position = target;
+      player.teleportRevealUntil = this.frame + TELEPORT_REVEAL_FRAMES;
       player.starPickupLockedUntil = Math.max(
         player.starPickupLockedUntil || 0,
         this.frame + TELEPORT_STAR_PICKUP_LOCK_FRAMES + 1
@@ -818,6 +831,7 @@ function createPlayer(index, tank, skillType) {
     starPickupLockedUntil: 0,
     runTimeMs: 0,
     crashed: false,
+    teleportRevealUntil: -1,
     effects: { self: null, debuff: null }
   };
 }

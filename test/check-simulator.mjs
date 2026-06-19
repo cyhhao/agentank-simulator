@@ -41,6 +41,7 @@ await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
 testCloakHidesEnemyTankFromOpponent();
+testTeleportLandingRevealsTankInGrass();
 testCloakedTankCanStillBeShot();
 testFreezeControlsEnemyForTwoFrames();
 testGlobalDebuffSkillsApplyThroughDistanceAndWalls();
@@ -497,6 +498,24 @@ function testCloakHidesEnemyTankFromOpponent() {
   sim.step([{ type: "cloak" }, null]);
   assert.equal(sim.snapshotFor(1).enemy.tank, null);
   assert.notEqual(sim.snapshotFor(0).me.tank, null);
+}
+
+function testTeleportLandingRevealsTankInGrass() {
+  const map = openMap(9, 7);
+  map[4][3] = "o"; // grass landing spot
+  const sim = new AgenTankSimulator({
+    map,
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "teleport" },
+      { id: "b", position: [7, 5], direction: "left", skillType: "overload" }
+    ]
+  });
+  sim.step([{ type: "teleport", x: 4, y: 3 }, null]);
+  const revealed = sim.snapshotFor(1).enemy.tank;
+  assert.notEqual(revealed, null, "teleport landing in grass should be briefly revealed to the enemy");
+  assert.deepEqual(revealed.position, [4, 3], "revealed position is the teleport landing spot");
+  sim.step([null, null]);
+  assert.equal(sim.snapshotFor(1).enemy.tank, null, "after the reveal window grass hides the tank again");
 }
 
 function testCloakedTankCanStillBeShot() {
