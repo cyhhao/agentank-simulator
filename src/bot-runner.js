@@ -1,5 +1,6 @@
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
+import { turnDirection } from "./constants.js";
 
 export async function loadBotFromFile(path, options = {}) {
   const code = await readFile(path, "utf8");
@@ -50,7 +51,8 @@ export class BotRunner {
 
   decide(context) {
     if (this.queue.length > 0) {
-      return { action: this.queue.shift(), logs: [], runtimeMs: 0, queued: true };
+      const queued = this.shiftQueuedDecision(context.me);
+      if (queued) return queued;
     }
     this.logs.length = 0;
     const actions = [];
@@ -86,8 +88,8 @@ export class BotRunner {
     const boostActive = isBoostActive(snapshot);
     if (boostActive && actions[0]?.type === "turn" && actions[1]?.type === "go") {
       const [, , ...queued] = actions;
-      this.queue.push(...queued);
       const action = { type: "turnGo", side: actions[0].side };
+      this.queueActions(queued, queueGuardForAction(action, snapshot));
       const reason = actions[0].reason || actions[1].reason;
       if (reason) action.reason = reason;
       return {
@@ -98,8 +100,8 @@ export class BotRunner {
     }
     if (boostActive && actions[0]?.type === "turn" && actions[1]?.type === "fire") {
       const [, , ...queued] = actions;
-      this.queue.push(...queued);
       const action = { type: "turnFire", side: actions[0].side };
+      this.queueActions(queued, queueGuardForAction(action, snapshot));
       const reason = actions[0].reason || actions[1].reason;
       if (reason) action.reason = reason;
       return {
@@ -109,12 +111,27 @@ export class BotRunner {
       };
     }
     const [action, ...queued] = actions;
-    this.queue.push(...queued);
+    this.queueActions(queued, queueGuardForAction(action, snapshot));
     return {
       action: action || null,
       logs: this.logs.slice(),
       runtimeMs
     };
+  }
+
+  shiftQueuedDecision(snapshot = {}) {
+    const entry = this.queue[0];
+    if (!entry) return null;
+    if (!queueGuardMatches(entry.guard, snapshot)) {
+      this.queue.length = 0;
+      return null;
+    }
+    this.queue.shift();
+    return { action: entry.action, logs: [], runtimeMs: 0, queued: true };
+  }
+
+  queueActions(actions, guard) {
+    for (const action of actions) this.queue.push({ action, guard });
   }
 
   timeoutDecision(started, error) {
@@ -143,6 +160,21 @@ function isBoostActive(snapshot = {}) {
   if (!snapshot.status?.boosted) return false;
   const remainingFrames = snapshot.skill?.activeRemainingFrames ?? snapshot.effects?.self?.remainingFrames;
   return remainingFrames == null || remainingFrames > 0;
+}
+
+function queueGuardForAction(action, snapshot = {}) {
+  if ((action?.type === "turn" || action?.type === "turnGo" || action?.type === "turnFire") && snapshot.tank?.direction) {
+    return {
+      direction: turnDirection(snapshot.tank.direction, action.side === "left" ? "left" : "right")
+    };
+  }
+  return null;
+}
+
+function queueGuardMatches(guard, snapshot = {}) {
+  if (!guard) return true;
+  if (guard.direction && snapshot.tank?.direction !== guard.direction) return false;
+  return true;
 }
 
 function createAgentProxy(snapshot, actions, logs) {

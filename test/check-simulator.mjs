@@ -41,6 +41,7 @@ await testAgentSpeakPrintUseLogsWithoutConsumingAction();
 testBotRunnerQueuesTurnThenFireAcrossFrames();
 testBoostedBotRunnerCompactsTurnThenFire();
 testBotRunnerDoesNotCompactOnExpiredBoostSnapshot();
+testBotRunnerDropsQueuedActionAfterSuppressedTurn();
 await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
@@ -516,6 +517,36 @@ function testBotRunnerDoesNotCompactOnExpiredBoostSnapshot() {
   const queued = bot.decide(sim.snapshotFor(0));
   assert.equal(queued.action.type, "fire");
   assert.equal(queued.queued, true);
+}
+
+function testBotRunnerDropsQueuedActionAfterSuppressedTurn() {
+  const sim = new AgenTankSimulator({
+    map: openMap(10, 7),
+    tanks: [
+      { id: "a", position: [1, 3], direction: "right", skillType: "freeze" },
+      { id: "b", position: [5, 3], direction: "up", skillType: "cloak" }
+    ]
+  });
+  const bot = loadBotFromCode(`
+    function onIdle(me) {
+      me.turn("left");
+      me.fire();
+    }
+  `);
+
+  const frozenDecision = bot.decide(sim.snapshotFor(1));
+  assert.deepEqual(frozenDecision.action, { type: "turn", side: "left" });
+  sim.step([{ type: "freeze" }, frozenDecision.action], [{ action: { type: "freeze" }, logs: [], runtimeMs: 0 }, frozenDecision]);
+  assert.equal(sim.players[1].direction, "up");
+
+  sim.step([null, null]);
+  const resumedDecision = bot.decide(sim.snapshotFor(1));
+  assert.deepEqual(resumedDecision.action, { type: "turn", side: "left" });
+  assert.equal(resumedDecision.queued, undefined);
+
+  const events = sim.step([null, resumedDecision.action], [{ action: null, logs: [], runtimeMs: 0 }, resumedDecision]);
+  assert.equal(events.some((event) => event.type === "bullet" && event.action === "created"), false);
+  assert.equal(sim.players[1].direction, "left");
 }
 
 async function testBotTimeoutDoesNotHang() {
