@@ -310,8 +310,8 @@ Frame and actions:
 - Each frame resolves player A action, player B action, then bullet movement.
 - `go`, `turn`, `fire`, `throwBomb`, and skills are single actions.
 - Action queues are supported by the bot runner.
-- `turn(); fire();` in one `onIdle` call is queued as two actions across frames, except while boosted, where it resolves as a same-frame `turnFire`.
-- While boosted, `turn(); go();` is compacted into `turnGo`.
+- Outside boost, the action queue executes one action per frame; for example, `turn(); fire();` in one `onIdle` call is queued across frames.
+- While boosted, `turn(); fire();` in one `onIdle` call compacts into same-frame `turnFire`, and `turn(); go();` compacts into `turnGo`.
 
 Terrain:
 
