@@ -7,6 +7,7 @@ import {
   DEFAULT_STAR_LIMIT,
   SKILL_COOLDOWN_FRAMES,
   SKILL_DURATION_FRAMES,
+  SHIELD_BULLET_HITS,
   TELEPORT_STAR_PICKUP_LOCK_FRAMES,
   directionDelta,
   turnDirection
@@ -260,13 +261,6 @@ export class AgenTankSimulator {
       }
       return;
     }
-    if (action.type === "turnFire") {
-      const side = action.side === "left" ? "left" : "right";
-      player.direction = turnDirection(player.direction, side);
-      events.push({ type: "tank", action: "turn", direction: side, objectId: player.objectId, free: true });
-      this.applyPlayerAction(player, { type: "fire" }, events, moveIntentByIndex, startPositions);
-      return;
-    }
     if (action.type === "back") {
       const delta = directionDelta(player.direction);
       const next = [player.position[0] - delta.x, player.position[1] - delta.y];
@@ -363,15 +357,7 @@ export class AgenTankSimulator {
     for (const player of this.players) {
       if (player.crashed || !cells.some((cell) => isSamePoint(cell, player.position))) continue;
       if (player.effects.self?.type === "shield") {
-        player.effects.self = null;
-        events.push({
-          type: "skill",
-          action: "expired",
-          by: player.index,
-          skillType: "shield",
-          sourceObjectId: player.objectId,
-          targetObjectId: player.objectId
-        });
+        expireShield(player, events);
         continue;
       }
       this.crashTank(player, events, { deferResult: true });
@@ -494,7 +480,11 @@ export class AgenTankSimulator {
 
     const duration = SKILL_DURATION_FRAMES[type] || 0;
     if (!duration) return;
-    player.effects.self = { type, expiresAt: this.frame + duration };
+    player.effects.self = {
+      type,
+      expiresAt: this.frame + duration,
+      ...(type === "shield" ? { hitsRemaining: SHIELD_BULLET_HITS } : {})
+    };
     events.push({
       type: "skill",
       action: "applied",
@@ -529,15 +519,7 @@ export class AgenTankSimulator {
         if (shieldedTank) {
           bullet.position = next;
           events.push(this.bulletGoEvent(bullet, owner, order));
-          shieldedTank.effects.self = null;
-          events.push({
-            type: "skill",
-            action: "expired",
-            by: shieldedTank.index,
-            skillType: "shield",
-            sourceObjectId: shieldedTank.objectId,
-            targetObjectId: shieldedTank.objectId
-          });
+          absorbShieldBulletHit(shieldedTank, events);
           events.push(this.bulletCrashEvent(bullet, owner));
           alive = false;
           break;
@@ -882,6 +864,25 @@ function occupiedByOther(players, actor, position) {
 
 function oppositeSide(side) {
   return side === "left" ? "right" : "left";
+}
+
+function absorbShieldBulletHit(player, events) {
+  const shield = player.effects.self;
+  if (shield?.type !== "shield") return;
+  shield.hitsRemaining = Math.max(0, Number(shield.hitsRemaining ?? SHIELD_BULLET_HITS) - 1);
+  if (shield.hitsRemaining <= 0) expireShield(player, events);
+}
+
+function expireShield(player, events) {
+  player.effects.self = null;
+  events.push({
+    type: "skill",
+    action: "expired",
+    by: player.index,
+    skillType: "shield",
+    sourceObjectId: player.objectId,
+    targetObjectId: player.objectId
+  });
 }
 
 function statusFor(player, frame = 0) {

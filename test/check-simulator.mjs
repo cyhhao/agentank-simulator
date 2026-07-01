@@ -22,6 +22,7 @@ const SIMULATE_LOCAL_CLI = fileURLToPath(new URL("../bin/simulate-local.mjs", im
 testFrameOrderMovesPlayersBeforeBullets();
 testMovingIntoOccupiedCellIsBlockedEvenIfOpponentWouldLeave();
 testSwapMoveIsBlockedForBothTanks();
+testEngineDoesNotSupportSameFrameTurnFireAction();
 testBulletMovesTwoCellsAndBreaksDirt();
 testReplayExportKeepsInitialMapAfterDirtBreak();
 testThrowBombPlacesVisibleBombAndCooldown();
@@ -37,6 +38,7 @@ testTeleportNearEnemyFireLocksForTwoFrames();
 testSnapshotMatchesDocumentedRuntimeShape();
 await testBotOnlyExposesOwnedSkillMethod();
 await testAgentSpeakPrintUseLogsWithoutConsumingAction();
+testBotRunnerQueuesTurnThenFireAcrossFrames();
 await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
@@ -47,7 +49,7 @@ testFreezeControlsEnemyForTwoFrames();
 testGlobalDebuffSkillsApplyThroughDistanceAndWalls();
 testStunRandomizesControlsAndExposesStatus();
 testPoisonSlowsActionCadenceForFourFrames();
-testShieldBlocksOneBulletAndExpires();
+testShieldBlocksTwoBulletsAndExpires();
 testBoostMovesUpToTwoTilesPerGo();
 testOverloadStatusDurationAndExpiry();
 testOverloadFireCreatesTwoBulletsAndExpires();
@@ -223,6 +225,19 @@ function testSwapMoveIsBlockedForBothTanks() {
   sim.step([{ type: "go" }, { type: "go" }]);
   assert.deepEqual(sim.players[0].position, [2, 2]);
   assert.deepEqual(sim.players[1].position, [3, 2]);
+}
+
+function testEngineDoesNotSupportSameFrameTurnFireAction() {
+  const sim = new AgenTankSimulator({
+    map: openMap(8, 5),
+    tanks: [
+      { id: "a", position: [2, 2], direction: "right", skillType: "teleport" },
+      { id: "b", position: [6, 2], direction: "left", skillType: "overload" }
+    ]
+  });
+  sim.step([{ type: "turnFire", side: "left" }, null]);
+  assert.equal(sim.players[0].direction, "right");
+  assert.equal(sim.bullets.length, 0);
 }
 
 function testTeleportMovesImmediatelyAndStartsCooldown() {
@@ -411,6 +426,33 @@ async function testAgentSpeakPrintUseLogsWithoutConsumingAction() {
     { type: "speak", data: "hello" },
     { type: "print", data: "stars 2" }
   ]);
+}
+
+function testBotRunnerQueuesTurnThenFireAcrossFrames() {
+  const sim = new AgenTankSimulator({
+    map: openMap(10, 7),
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "teleport" },
+      { id: "b", position: [8, 5], direction: "left", skillType: "cloak" }
+    ]
+  });
+  const bot = loadBotFromCode(`
+    function onIdle(me) {
+      me.turn("left");
+      me.fire();
+    }
+  `);
+  const first = bot.decide(sim.snapshotFor(0));
+  assert.deepEqual(first.action, { type: "turn", side: "left" });
+  assert.equal(first.queued, undefined);
+
+  sim.step([first.action, null], [first, { action: null, logs: [], runtimeMs: 0 }]);
+  assert.equal(sim.players[0].direction, "up");
+  assert.equal(sim.bullets.length, 0);
+
+  const second = bot.decide(sim.snapshotFor(0));
+  assert.equal(second.action.type, "fire");
+  assert.equal(second.queued, true);
 }
 
 async function testBotTimeoutDoesNotHang() {
@@ -635,9 +677,9 @@ function testPoisonSlowsActionCadenceForFourFrames() {
   assert.equal(sim.snapshotFor(1).me.status.poisoned, false);
 }
 
-function testShieldBlocksOneBulletAndExpires() {
+function testShieldBlocksTwoBulletsAndExpires() {
   const sim = new AgenTankSimulator({
-    map: openMap(10, 7),
+    map: openMap(12, 7),
     tanks: [
       { id: "a", position: [1, 3], direction: "right", skillType: "overload" },
       { id: "b", position: [4, 3], direction: "left", skillType: "shield" }
@@ -645,8 +687,31 @@ function testShieldBlocksOneBulletAndExpires() {
   });
   sim.step([null, { type: "shield" }]);
   assert.equal(sim.snapshotFor(1).me.status.shielded, true);
-  sim.step([{ type: "fire" }, null]);
-  const events = sim.step([null, null]);
+  assert.equal(sim.snapshotFor(1).me.skill.remainingCooldownFrames, 25);
+
+  sim.bullets.push({
+    objectId: "shot1",
+    ownerIndex: 0,
+    ownerObjectId: "a",
+    position: [3, 3],
+    direction: "right",
+    crashed: false
+  });
+  let events = sim.step([null, null]);
+  assert.equal(sim.players[1].crashed, false);
+  assert.equal(events.some((event) => event.type === "skill" && event.action === "expired" && event.skillType === "shield"), false);
+  assert.equal(sim.snapshotFor(1).me.status.shielded, true);
+
+  sim.bullets.length = 0;
+  sim.bullets.push({
+    objectId: "shot2",
+    ownerIndex: 0,
+    ownerObjectId: "a",
+    position: [3, 3],
+    direction: "right",
+    crashed: false
+  });
+  events = sim.step([null, null]);
   assert.equal(sim.players[1].crashed, false);
   assert.equal(events.some((event) => event.type === "skill" && event.action === "expired" && event.skillType === "shield"), true);
   assert.equal(sim.snapshotFor(1).me.status.shielded, false);

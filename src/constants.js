@@ -12,7 +12,7 @@ export const SKILL_COOLDOWN_FRAMES = {
   cloak: 35,
   teleport: 40,
   freeze: 34,
-  shield: 30,
+  shield: 25,
   stun: 20,
   poison: 25,
   boost: 26
@@ -35,6 +35,7 @@ export const BOMB_FUSE_FRAMES = 10;
 export const BOMB_COOLDOWN_FRAMES = 10;
 export const BOMB_BLAST_RANGE = 2;
 export const TELEPORT_STAR_PICKUP_LOCK_FRAMES = 2;
+export const SHIELD_BULLET_HITS = 2;
 
 export function turnDirection(direction, side) {
   const index = DIRECTIONS.indexOf(direction);
