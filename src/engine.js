@@ -115,7 +115,7 @@ export class AgenTankSimulator {
 
   visibleTankFor(player, observer) {
     if (!player || player.crashed) return null;
-    if (player !== observer && player.effects.self?.type === "cloak") {
+    if (player !== observer && hasActiveSelfEffect(player, "cloak", this.frame)) {
       return null;
     }
     if (player !== observer && isGrass(this.map, player.position[0], player.position[1])) {
@@ -188,8 +188,9 @@ export class AgenTankSimulator {
       const player = this.players[index];
       const action = normalizedActionForPlayer(player, actions[index], this.frame, this.rng);
       actions[index] = action;
-      if (!player.crashed && (action?.type === "go" || action?.type === "turnGo")) {
-        const moveDirection = action.type === "turnGo"
+      const canTurnGo = action?.type === "turnGo" && player.effects.self?.type === "boost";
+      if (!player.crashed && (action?.type === "go" || canTurnGo)) {
+        const moveDirection = canTurnGo
           ? turnDirection(player.direction, action.side === "left" ? "left" : "right")
           : player.direction;
         const delta = directionDelta(moveDirection);
@@ -250,7 +251,7 @@ export class AgenTankSimulator {
       }
       return;
     }
-    if (action.type === "turnGo") {
+    if (action.type === "turnGo" && player.effects.self?.type === "boost") {
       const side = action.side === "left" ? "left" : "right";
       player.direction = turnDirection(player.direction, side);
       events.push({ type: "tank", action: "turn", direction: side, objectId: player.objectId, free: true });
@@ -825,19 +826,31 @@ function createPlayer(index, tank, skillType) {
   };
 }
 
-function isControlled(player) {
-  return player.effects.debuff?.type === "freeze";
+function activeEffect(effect, frame) {
+  return Boolean(effect && effect.expiresAt > frame);
+}
+
+function hasActiveSelfEffect(player, type, frame) {
+  return activeEffect(player.effects.self, frame) && player.effects.self.type === type;
+}
+
+function hasActiveDebuffEffect(player, type, frame) {
+  return activeEffect(player.effects.debuff, frame) && player.effects.debuff.type === type;
+}
+
+function isControlled(player, frame) {
+  return hasActiveDebuffEffect(player, "freeze", frame);
 }
 
 function canActThisFrame(player, frame) {
-  if (isControlled(player)) return false;
-  if (player.effects.debuff?.type === "poison") return frame % 2 === 0;
+  if (isControlled(player, frame)) return false;
+  if (hasActiveDebuffEffect(player, "poison", frame)) return frame % 2 === 0;
   return true;
 }
 
 function normalizedActionForPlayer(player, action, frame, rng) {
   if (!action || player.crashed || !canActThisFrame(player, frame)) return null;
-  if (player.effects.debuff?.type !== "stun") return action;
+  if (!hasActiveDebuffEffect(player, "stun", frame)) return action;
   if (action.type === "turn") {
     const side = rng() < 0.5 ? action.side : oppositeSide(action.side);
     return {
@@ -893,32 +906,34 @@ function expireShield(player, events) {
 }
 
 function statusFor(player, frame = 0) {
-  const poisoned = player.effects.debuff?.type === "poison";
+  const poisoned = hasActiveDebuffEffect(player, "poison", frame);
   return {
-    boosted: player.effects.self?.type === "boost",
-    overloaded: player.effects.self?.type === "overload",
+    boosted: hasActiveSelfEffect(player, "boost", frame),
+    overloaded: hasActiveSelfEffect(player, "overload", frame),
     fireLocked: (player.fireLockedUntil || 0) > frame,
     bombCooldownFrames: Math.max(0, (player.bombCooldownUntil || 0) - frame),
     bombActive: false,
-    shielded: player.effects.self?.type === "shield",
-    stunned: player.effects.debuff?.type === "stun",
-    frozen: player.effects.debuff?.type === "freeze",
+    shielded: hasActiveSelfEffect(player, "shield", frame),
+    stunned: hasActiveDebuffEffect(player, "stun", frame),
+    frozen: hasActiveDebuffEffect(player, "freeze", frame),
     poisoned,
-    cloaked: player.effects.self?.type === "cloak",
+    cloaked: hasActiveSelfEffect(player, "cloak", frame),
     actionSpeed: poisoned ? 0.5 : 1,
     canActThisFrame: canActThisFrame(player, frame)
   };
 }
 
 function effectsFor(player, frame = 0) {
+  const self = activeEffect(player.effects.self, frame) ? player.effects.self : null;
+  const debuff = activeEffect(player.effects.debuff, frame) ? player.effects.debuff : null;
   return {
-    self: player.effects.self ? {
-      type: player.effects.self.type,
-      remainingFrames: Math.max(0, player.effects.self.expiresAt - frame)
+    self: self ? {
+      type: self.type,
+      remainingFrames: self.expiresAt - frame
     } : null,
-    debuff: player.effects.debuff ? {
-      type: player.effects.debuff.type,
-      remainingFrames: Math.max(0, player.effects.debuff.expiresAt - frame)
+    debuff: debuff ? {
+      type: debuff.type,
+      remainingFrames: debuff.expiresAt - frame
     } : null
   };
 }

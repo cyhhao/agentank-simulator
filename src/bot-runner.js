@@ -83,7 +83,8 @@ export class BotRunner {
         runtimeMs
       };
     }
-    if (snapshot.status?.boosted && actions[0]?.type === "turn" && actions[1]?.type === "go") {
+    const boostActive = isBoostActive(snapshot);
+    if (boostActive && actions[0]?.type === "turn" && actions[1]?.type === "go") {
       const [, , ...queued] = actions;
       this.queue.push(...queued);
       const action = { type: "turnGo", side: actions[0].side };
@@ -95,7 +96,7 @@ export class BotRunner {
         runtimeMs
       };
     }
-    if (snapshot.status?.boosted && actions[0]?.type === "turn" && actions[1]?.type === "fire") {
+    if (boostActive && actions[0]?.type === "turn" && actions[1]?.type === "fire") {
       const [, , ...queued] = actions;
       this.queue.push(...queued);
       const action = { type: "turnFire", side: actions[0].side };
@@ -136,6 +137,12 @@ export class BotRunner {
       error
     };
   }
+}
+
+function isBoostActive(snapshot = {}) {
+  if (!snapshot.status?.boosted) return false;
+  const remainingFrames = snapshot.skill?.activeRemainingFrames ?? snapshot.effects?.self?.remainingFrames;
+  return remainingFrames == null || remainingFrames > 0;
 }
 
 function createAgentProxy(snapshot, actions, logs) {
