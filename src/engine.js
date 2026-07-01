@@ -261,6 +261,13 @@ export class AgenTankSimulator {
       }
       return;
     }
+    if (action.type === "turnFire" && player.effects.self?.type === "boost") {
+      const side = action.side === "left" ? "left" : "right";
+      player.direction = turnDirection(player.direction, side);
+      events.push({ type: "tank", action: "turn", direction: side, objectId: player.objectId, free: true });
+      this.applyPlayerAction(player, { type: "fire" }, events, moveIntentByIndex, startPositions);
+      return;
+    }
     if (action.type === "back") {
       const delta = directionDelta(player.direction);
       const next = [player.position[0] - delta.x, player.position[1] - delta.y];

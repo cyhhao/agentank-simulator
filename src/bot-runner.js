@@ -95,6 +95,18 @@ export class BotRunner {
         runtimeMs
       };
     }
+    if (snapshot.status?.boosted && actions[0]?.type === "turn" && actions[1]?.type === "fire") {
+      const [, , ...queued] = actions;
+      this.queue.push(...queued);
+      const action = { type: "turnFire", side: actions[0].side };
+      const reason = actions[0].reason || actions[1].reason;
+      if (reason) action.reason = reason;
+      return {
+        action,
+        logs: this.logs.slice(),
+        runtimeMs
+      };
+    }
     const [action, ...queued] = actions;
     this.queue.push(...queued);
     return {

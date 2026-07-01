@@ -22,7 +22,7 @@ const SIMULATE_LOCAL_CLI = fileURLToPath(new URL("../bin/simulate-local.mjs", im
 testFrameOrderMovesPlayersBeforeBullets();
 testMovingIntoOccupiedCellIsBlockedEvenIfOpponentWouldLeave();
 testSwapMoveIsBlockedForBothTanks();
-testEngineDoesNotSupportSameFrameTurnFireAction();
+testEngineOnlySupportsSameFrameTurnFireWhileBoosted();
 testBulletMovesTwoCellsAndBreaksDirt();
 testReplayExportKeepsInitialMapAfterDirtBreak();
 testThrowBombPlacesVisibleBombAndCooldown();
@@ -39,6 +39,7 @@ testSnapshotMatchesDocumentedRuntimeShape();
 await testBotOnlyExposesOwnedSkillMethod();
 await testAgentSpeakPrintUseLogsWithoutConsumingAction();
 testBotRunnerQueuesTurnThenFireAcrossFrames();
+testBoostedBotRunnerCompactsTurnThenFire();
 await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
@@ -227,17 +228,23 @@ function testSwapMoveIsBlockedForBothTanks() {
   assert.deepEqual(sim.players[1].position, [3, 2]);
 }
 
-function testEngineDoesNotSupportSameFrameTurnFireAction() {
+function testEngineOnlySupportsSameFrameTurnFireWhileBoosted() {
   const sim = new AgenTankSimulator({
     map: openMap(8, 5),
     tanks: [
-      { id: "a", position: [2, 2], direction: "right", skillType: "teleport" },
+      { id: "a", position: [2, 2], direction: "right", skillType: "boost" },
       { id: "b", position: [6, 2], direction: "left", skillType: "overload" }
     ]
   });
   sim.step([{ type: "turnFire", side: "left" }, null]);
   assert.equal(sim.players[0].direction, "right");
   assert.equal(sim.bullets.length, 0);
+
+  sim.step([{ type: "boost" }, null]);
+  const events = sim.step([{ type: "turnFire", side: "left" }, null]);
+  assert.equal(sim.players[0].direction, "up");
+  assert.equal(events.some((event) => event.type === "tank" && event.action === "turn" && event.free), true);
+  assert.equal(events.some((event) => event.type === "bullet" && event.action === "created" && event.tank?.id === "a"), true);
 }
 
 function testTeleportMovesImmediatelyAndStartsCooldown() {
@@ -453,6 +460,25 @@ function testBotRunnerQueuesTurnThenFireAcrossFrames() {
   const second = bot.decide(sim.snapshotFor(0));
   assert.equal(second.action.type, "fire");
   assert.equal(second.queued, true);
+}
+
+function testBoostedBotRunnerCompactsTurnThenFire() {
+  const sim = new AgenTankSimulator({
+    map: openMap(10, 7),
+    tanks: [
+      { id: "a", position: [2, 2], direction: "right", skillType: "boost" },
+      { id: "b", position: [8, 5], direction: "left", skillType: "cloak" }
+    ]
+  });
+  const bot = loadBotFromCode(`
+    function onIdle(me) {
+      me.turn("left");
+      me.fire();
+    }
+  `);
+  sim.step([{ type: "boost" }, null]);
+  const decision = bot.decide(sim.snapshotFor(0));
+  assert.deepEqual(decision.action, { type: "turnFire", side: "left" });
 }
 
 async function testBotTimeoutDoesNotHang() {

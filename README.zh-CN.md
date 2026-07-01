@@ -310,7 +310,7 @@ try {
 - 每帧先结算玩家 A 动作，再结算玩家 B 动作，然后移动子弹。
 - `go`、`turn`、`fire`、`throwBomb` 和技能都是单动作。
 - bot runner 支持动作队列。
-- 同一次 `onIdle` 里 `turn(); fire();` 会按队列分两帧执行。
+- 同一次 `onIdle` 里 `turn(); fire();` 通常按队列分两帧执行；boost 生效期间会合并为同帧 `turnFire`。
 - boost 状态下，`turn(); go();` 会合并为 `turnGo`。
 
 地形：
