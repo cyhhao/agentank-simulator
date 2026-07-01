@@ -310,8 +310,8 @@ try {
 - 每帧先结算玩家 A 动作，再结算玩家 B 动作，然后移动子弹。
 - `go`、`turn`、`fire`、`throwBomb` 和技能都是单动作。
 - bot runner 支持动作队列。
-- 同一次 `onIdle` 里 `turn(); fire();` 会合并为同帧 `turnFire`。
-- boost 状态下，`turn(); go();` 会合并为 `turnGo`。
+- 非 boost 状态下，动作队列每帧只执行一个动作；例如同一次 `onIdle` 里的 `turn(); fire();` 会分帧执行。
+- boost 状态下，同一次 `onIdle` 里 `turn(); fire();` 会合并为同帧 `turnFire`，`turn(); go();` 会合并为 `turnGo`。
 
 地形：
 
@@ -342,7 +342,7 @@ try {
 - `teleport`：立即移动到合法目标；非法目标也消耗冷却；不能落在坦克或子弹上；传送到星星时落在相邻格。
 - `freeze`：给敌方短 debuff，使其不能执行受控动作。
 - `stun`：给敌方 debuff，可能反转转向或移动。
-- `shield`：阻挡一次子弹或炸弹命中，然后失效。
+- `shield`：阻挡两次子弹命中后失效；炸弹命中仍会消耗护盾。
 - `boost`：一次实际执行的 `go()` 最多移动两格，遇阻停止。
 - `poison`：降低目标行动频率。
 
