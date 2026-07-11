@@ -333,6 +333,7 @@ Bullets and firing:
 Stars and results:
 
 - Stars are collected by occupying their cell.
+- A replacement star appears 10 frames after the previous star is collected.
 - The default simulator has no `5 star` early win. Use `--star-limit` to opt in.
 - Frame-limit games are decided by stars, then lower runtime.
 - Double-crash ties use the same star/runtime tiebreak.
@@ -401,7 +402,7 @@ Subpath exports:
 ## Known Gaps
 
 - Exact official runtime accounting is approximate.
-- Exact official star spawning policy may differ.
+- Random star placement may still differ from the official service.
 - Some same-frame edge cases for simultaneous kills and bullet crossings still need official replay calibration.
 - Full differential replay checking against official matches is not part of this package yet.
 - Random map generation is a deterministic local stress generator, not a claim to match the platform's random map distribution exactly.

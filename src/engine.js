@@ -5,6 +5,7 @@ import {
   BULLET_STEPS_PER_FRAME,
   DEFAULT_MAX_FRAMES,
   DEFAULT_STAR_LIMIT,
+  STAR_RESPAWN_DELAY_FRAMES,
   SKILL_COOLDOWN_FRAMES,
   SKILL_DURATION_FRAMES,
   SHIELD_BULLET_HITS,
@@ -47,6 +48,7 @@ export class AgenTankSimulator {
     this.rng = options.seed == null ? Math.random : seededRandom(options.seed);
     this.initialStar = options.star ? options.star.slice() : null;
     this.star = this.initialStar ? this.initialStar.slice() : null;
+    this.nextStarSpawnFrame = 0;
     this.nextObjectId = 1;
     this.records = [];
     this.result = null;
@@ -70,6 +72,7 @@ export class AgenTankSimulator {
     copy.rng = options.rng || (() => 0.5);
     copy.initialStar = this.initialStar ? this.initialStar.slice() : null;
     copy.star = this.star ? this.star.slice() : null;
+    copy.nextStarSpawnFrame = this.nextStarSpawnFrame;
     copy.nextObjectId = this.nextObjectId;
     copy.records = [];
     copy.result = this.result ? { ...this.result } : null;
@@ -700,10 +703,11 @@ export class AgenTankSimulator {
     player.stars += 1;
     events.push({ type: "star", action: "collected", by: player.index, position: this.star.slice() });
     this.star = null;
+    this.nextStarSpawnFrame = this.frame + STAR_RESPAWN_DELAY_FRAMES;
   }
 
   ensureStar(events) {
-    if (this.star) return;
+    if (this.star || this.frame < this.nextStarSpawnFrame) return;
     const next = this.starProvider
       ? this.starProvider({ frame: this.frame, map: this.map, players: this.players.map((player) => publicPlayerState(player, this.frame)) })
       : this.randomStar();
