@@ -11,7 +11,7 @@ export const SKILL_COOLDOWN_FRAMES = {
   overload: 32,
   cloak: 35,
   teleport: 40,
-  freeze: 34,
+  freeze: 29,
   shield: 25,
   stun: 20,
   poison: 25,

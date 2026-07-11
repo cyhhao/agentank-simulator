@@ -54,6 +54,7 @@ export class AgenTankSimulator {
     this.bullets = [];
     this.bombs = [];
     this.pendingStarEvents = [];
+    this.lastFrameActionSlotResolved = [false, false];
     if (this.star) this.pendingStarEvents.push({ type: "star", action: "created", position: this.star.slice() });
   }
 
@@ -75,6 +76,7 @@ export class AgenTankSimulator {
     copy.bullets = this.bullets.map((bullet) => ({ ...bullet, position: bullet.position.slice() }));
     copy.bombs = this.bombs.map((bomb) => ({ ...bomb, position: bomb.position.slice() }));
     copy.pendingStarEvents = this.pendingStarEvents.map((event) => cloneEvent(event));
+    copy.lastFrameActionSlotResolved = this.lastFrameActionSlotResolved.slice();
     return copy;
   }
 
@@ -143,26 +145,38 @@ export class AgenTankSimulator {
   }
 
   run(botA, botB) {
+    const bots = [botA, botB];
+    const pendingDecisions = [null, null];
     while (!this.result && this.frame < this.maxFrames) {
-      const decisions = [botA, botB].map((bot, index) => {
+      const decisions = bots.map((bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        return bot.decide(this.snapshotFor(index));
+        if (pendingDecisions[index]) return pendingDecisions[index];
+        const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
+        if (decision.action) pendingDecisions[index] = decision;
+        return decision;
       });
       this.step(decisions.map((item) => item.action), decisions);
+      settlePendingDecisions(this, pendingDecisions, decisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
   }
 
   async runAsync(botA, botB) {
+    const bots = [botA, botB];
+    const pendingDecisions = [null, null];
     while (!this.result && this.frame < this.maxFrames) {
-      const decisions = await Promise.all([botA, botB].map((bot, index) => {
+      const decisions = await Promise.all(bots.map(async (bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        return bot.decide(this.snapshotFor(index));
+        if (pendingDecisions[index]) return pendingDecisions[index];
+        const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
+        if (decision.action) pendingDecisions[index] = decision;
+        return decision;
       }));
       this.step(decisions.map((item) => item.action), decisions);
+      settlePendingDecisions(this, pendingDecisions, decisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
@@ -170,6 +184,7 @@ export class AgenTankSimulator {
 
   step(actions = [], decisions = []) {
     if (this.result) return [];
+    this.lastFrameActionSlotResolved = [false, false];
     const frameEvents = [];
     frameEvents.push(...this.pendingStarEvents);
     this.pendingStarEvents = [];
@@ -213,6 +228,7 @@ export class AgenTankSimulator {
       }
       const player = this.players[index];
       if (player.crashed || !canActThisFrame(player, this.frame)) continue;
+      this.lastFrameActionSlotResolved[index] = true;
       player.runTimeMs += Number(decision.runtimeMs || 0);
       this.applyPlayerAction(player, actions[index], frameEvents, moveIntentByIndex, startPositions);
       this.collectStar(player, frameEvents);
@@ -434,9 +450,20 @@ export class AgenTankSimulator {
 
   applySkill(player, action, events) {
     const type = action.type;
-    if (player.skillType !== type || player.skillCooldownUntil > this.frame) return;
+    if (player.skillType !== type) return;
+    if (player.skillCooldownUntil > this.frame) {
+      events.push({
+        type: "skill",
+        action: "failed",
+        by: player.index,
+        skillType: type,
+        reason: "cooldown",
+        sourceObjectId: player.objectId
+      });
+      return;
+    }
     player.skillCooldownFrames = SKILL_COOLDOWN_FRAMES[type] || 32;
-    player.skillCooldownUntil = this.frame + player.skillCooldownFrames + 1;
+    player.skillCooldownUntil = skillReadyFrame(type, this.frame, player.skillCooldownFrames);
     events.push({ type: "skill", action: "cast", by: player.index, skillType: type, sourceObjectId: player.objectId });
 
     if (type === "teleport") {
@@ -472,7 +499,12 @@ export class AgenTankSimulator {
       const enemy = this.players[player.index === 0 ? 1 : 0];
       const duration = SKILL_DURATION_FRAMES[type] || 0;
       if (!duration || enemy.crashed) return;
-      const expiresAt = this.frame + duration + (type === "stun" ? 1 : 0);
+      // If the target already resolved this frame, freeze must cover the next
+      // two action slots instead of counting the completed slot as frame one.
+      const resolvedCurrentAction = Boolean(this.lastFrameActionSlotResolved[enemy.index]);
+      const expiresAt = this.frame + duration
+        + (type === "stun" ? 1 : 0)
+        + (type === "freeze" && resolvedCurrentAction ? 1 : 0);
       enemy.effects.debuff = { type, expiresAt };
       events.push({
         type: "skill",
@@ -769,6 +801,32 @@ function normalizeStarLimit(value) {
   if (value == null || value === false) return DEFAULT_STAR_LIMIT;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_STAR_LIMIT;
+}
+
+function normalizeDecision(decision) {
+  return decision && typeof decision === "object"
+    ? decision
+    : { action: null, logs: [], runtimeMs: 0 };
+}
+
+function settlePendingDecisions(simulator, pendingDecisions, decisions) {
+  for (const index of [0, 1]) {
+    const pending = pendingDecisions[index];
+    if (!pending) continue;
+    if (simulator.lastFrameActionSlotResolved[index] || simulator.players[index].crashed) {
+      pendingDecisions[index] = null;
+      continue;
+    }
+    if (decisions[index] === pending && pending.logs?.length) {
+      pendingDecisions[index] = { ...pending, logs: [] };
+    }
+  }
+}
+
+function skillReadyFrame(type, castFrame, cooldownFrames) {
+  // Official replays allow freeze again at F+29. Other skills retain their
+  // existing inclusive post-cast cooldown boundary.
+  return castFrame + cooldownFrames + (type === "freeze" ? 0 : 1);
 }
 
 function clonePlayer(player) {

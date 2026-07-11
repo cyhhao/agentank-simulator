@@ -297,7 +297,7 @@ try {
 
 - `tank`：`go`、`turn`、`crashed`。
 - `bullet`：`created`、`go`、`crashed`。
-- `skill`：`cast`、`applied`、`expired`。
+- `skill`：`cast`、`applied`、`failed`（例如 `reason: "cooldown"`）、`expired`。
 - `star`：`created`、`collected`。
 - `map`：土堆 `destroyed`。
 - `bomb`：`created`、`exploded`。
@@ -311,6 +311,7 @@ try {
 - `go`、`turn`、`fire`、`throwBomb` 和技能都是单动作。
 - bot runner 支持动作队列。
 - 非 boost 状态下，动作队列每帧只执行一个动作；例如同一次 `onIdle` 里的 `turn(); fire();` 会分帧执行。
+- freeze 只会暂停动作队列，不会丢弃已经排队的命令；冻结结束后继续执行。
 - boost 状态下，同一次 `onIdle` 里 `turn(); fire();` 会合并为同帧 `turnFire`，`turn(); go();` 会合并为 `turnGo`。
 
 地形：
@@ -340,7 +341,7 @@ try {
 - `overload`：进入短时自身效果；下一次开火产生散射子弹。
 - `cloak`：生效期间让敌方看不见坦克。
 - `teleport`：立即移动到合法目标；非法目标也消耗冷却；不能落在坦克或子弹上；传送到星星时落在相邻格。
-- `freeze`：给敌方短 debuff，使其不能执行受控动作。
+- `freeze`：让敌方 2 帧无法行动，但不丢弃已排队命令；冷却为 29 帧。
 - `stun`：给敌方 debuff，可能反转转向或移动。
 - `shield`：阻挡两次子弹命中后失效；炸弹命中仍会消耗护盾。
 - `boost`：一次实际执行的 `go()` 最多移动两格，遇阻停止。

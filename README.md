@@ -297,7 +297,7 @@ Common event families:
 
 - `tank`: `go`, `turn`, `crashed`.
 - `bullet`: `created`, `go`, `crashed`.
-- `skill`: `cast`, `applied`, `expired`.
+- `skill`: `cast`, `applied`, `failed` (for example, `reason: "cooldown"`), `expired`.
 - `star`: `created`, `collected`.
 - `map`: `destroyed` for dirt.
 - `bomb`: `created`, `exploded`.
@@ -311,6 +311,7 @@ Frame and actions:
 - `go`, `turn`, `fire`, `throwBomb`, and skills are single actions.
 - Action queues are supported by the bot runner.
 - Outside boost, the action queue executes one action per frame; for example, `turn(); fire();` in one `onIdle` call is queued across frames.
+- Freeze pauses queued commands instead of discarding them; execution resumes after freeze expires.
 - While boosted, `turn(); fire();` in one `onIdle` call compacts into same-frame `turnFire`, and `turn(); go();` compacts into `turnGo`.
 
 Terrain:
@@ -340,7 +341,7 @@ Skills:
 - `overload`: arms a temporary self effect; the next fire creates a spread shot.
 - `cloak`: hides the tank from the opponent while active.
 - `teleport`: moves immediately to a legal target, consumes cooldown on illegal targets, cannot land on tanks or bullets, and lands adjacent when targeting a star.
-- `freeze`: applies a short enemy debuff that prevents controlled actions.
+- `freeze`: prevents the enemy from acting for 2 frames without discarding queued commands; cooldown is 29 frames.
 - `stun`: applies a debuff that can reverse turns or movement.
 - `shield`: blocks two incoming bullet hits before expiring. Bomb hits still consume the shield.
 - `boost`: makes one executed `go()` move up to two cells, stopping at blockers.

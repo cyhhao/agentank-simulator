@@ -41,7 +41,8 @@ await testAgentSpeakPrintUseLogsWithoutConsumingAction();
 testBotRunnerQueuesTurnThenFireAcrossFrames();
 testBoostedBotRunnerCompactsTurnThenFire();
 testBotRunnerDoesNotCompactOnExpiredBoostSnapshot();
-testBotRunnerDropsQueuedActionAfterSuppressedTurn();
+testRunPreservesQueuedActionDuringFreeze();
+await testAsyncRunPreservesQueuedActionDuringFreeze();
 await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
@@ -49,6 +50,7 @@ testCloakHidesEnemyTankFromOpponent();
 testTeleportLandingRevealsTankInGrass();
 testCloakedTankCanStillBeShot();
 testFreezeControlsEnemyForTwoFrames();
+testFreezeCooldownIsReadyOnTwentyNinthFrame();
 testGlobalDebuffSkillsApplyThroughDistanceAndWalls();
 testStunRandomizesControlsAndExposesStatus();
 testPoisonSlowsActionCadenceForFourFrames();
@@ -519,33 +521,53 @@ function testBotRunnerDoesNotCompactOnExpiredBoostSnapshot() {
   assert.equal(queued.queued, true);
 }
 
-function testBotRunnerDropsQueuedActionAfterSuppressedTurn() {
+function testRunPreservesQueuedActionDuringFreeze() {
+  const { sim, freezer, target } = freezeQueueMatch();
+  const replay = sim.run(freezer, target);
+  assertFreezeQueueReplay(replay, sim);
+}
+
+async function testAsyncRunPreservesQueuedActionDuringFreeze() {
+  const { sim, freezer, target } = freezeQueueMatch();
+  const replay = await sim.runAsync(freezer, target);
+  assertFreezeQueueReplay(replay, sim);
+}
+
+function freezeQueueMatch() {
   const sim = new AgenTankSimulator({
+    maxFrames: 4,
     map: openMap(10, 7),
     tanks: [
       { id: "a", position: [1, 3], direction: "right", skillType: "freeze" },
       { id: "b", position: [5, 3], direction: "up", skillType: "cloak" }
     ]
   });
-  const bot = loadBotFromCode(`
+  let cast = false;
+  const freezer = {
+    decide() {
+      const action = cast ? null : { type: "freeze" };
+      cast = true;
+      return { action, logs: [], runtimeMs: 0 };
+    }
+  };
+  const target = loadBotFromCode(`
     function onIdle(me) {
+      me.speak("idle");
       me.turn("left");
       me.fire();
     }
   `);
+  return { sim, freezer, target };
+}
 
-  const frozenDecision = bot.decide(sim.snapshotFor(1));
-  assert.deepEqual(frozenDecision.action, { type: "turn", side: "left" });
-  sim.step([{ type: "freeze" }, frozenDecision.action], [{ action: { type: "freeze" }, logs: [], runtimeMs: 0 }, frozenDecision]);
-  assert.equal(sim.players[1].direction, "up");
-
-  sim.step([null, null]);
-  const resumedDecision = bot.decide(sim.snapshotFor(1));
-  assert.deepEqual(resumedDecision.action, { type: "turn", side: "left" });
-  assert.equal(resumedDecision.queued, undefined);
-
-  const events = sim.step([null, resumedDecision.action], [{ action: null, logs: [], runtimeMs: 0 }, resumedDecision]);
-  assert.equal(events.some((event) => event.type === "bullet" && event.action === "created"), false);
+function assertFreezeQueueReplay(replay, sim) {
+  const records = replay.replayData.replay.records;
+  const speechEvents = records.flat().filter((event) => event.type === "speech" && event.objectId === "b");
+  assert.equal(speechEvents.length, 1);
+  assert.equal(records[0].some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), false);
+  assert.equal(records[1].some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), false);
+  assert.equal(records[2].some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), true);
+  assert.equal(records[3].some((event) => event.type === "bullet" && event.tank?.id === "b" && event.action === "created"), true);
   assert.equal(sim.players[1].direction, "left");
 }
 
@@ -671,25 +693,50 @@ function testCloakedTankCanStillBeShot() {
 }
 
 function testFreezeControlsEnemyForTwoFrames() {
+  assert.deepEqual(freezeTargetActionsByFrame(0), [false, false, true, true]);
+  assert.deepEqual(freezeTargetActionsByFrame(1), [true, false, false, true]);
+}
+
+function freezeTargetActionsByFrame(casterIndex) {
+  const targetIndex = casterIndex === 0 ? 1 : 0;
+  const sim = new AgenTankSimulator({
+    map: openMap(10, 7),
+    tanks: [
+      { id: "a", position: [1, 3], direction: "right", skillType: casterIndex === 0 ? "freeze" : "cloak" },
+      { id: "b", position: [8, 3], direction: "left", skillType: casterIndex === 1 ? "freeze" : "cloak" }
+    ]
+  });
+  const targetId = sim.players[targetIndex].objectId;
+  const acted = [];
+  for (let frame = 0; frame < 4; frame += 1) {
+    const actions = [{ type: "turn", side: "left" }, { type: "turn", side: "left" }];
+    actions[casterIndex] = frame === 0 ? { type: "freeze" } : null;
+    const events = sim.step(actions);
+    acted.push(events.some((event) => event.type === "tank" && event.objectId === targetId && event.action === "turn"));
+  }
+  return acted;
+}
+
+function testFreezeCooldownIsReadyOnTwentyNinthFrame() {
   const sim = new AgenTankSimulator({
     map: openMap(10, 7),
     tanks: [
       { id: "a", position: [1, 3], direction: "right", skillType: "freeze" },
-      { id: "b", position: [5, 3], direction: "left", skillType: "cloak" }
+      { id: "b", position: [8, 3], direction: "left", skillType: "cloak" }
     ]
   });
-  let events = sim.step([{ type: "freeze" }, { type: "go" }]);
-  assert.equal(events.some((event) => event.type === "skill" && event.action === "applied" && event.skillType === "freeze"), true);
-  assert.deepEqual(sim.players[1].position, [5, 3]);
-  assert.equal(sim.snapshotFor(1).me.status.frozen, true);
 
-  events = sim.step([null, { type: "go" }]);
-  assert.deepEqual(sim.players[1].position, [5, 3]);
-  assert.equal(events.some((event) => event.type === "tank" && event.objectId === "b" && event.action === "go"), false);
+  sim.step([{ type: "freeze" }, null]);
+  assert.equal(sim.snapshotFor(0).me.skill.remainingCooldownFrames, 28);
+  while (sim.frame < 28) sim.step([null, null]);
+  assert.equal(sim.snapshotFor(0).me.skill.remainingCooldownFrames, 1);
 
-  events = sim.step([null, { type: "go" }]);
-  assert.equal(events.some((event) => event.type === "skill" && event.action === "expired" && event.skillType === "freeze"), true);
-  assert.deepEqual(sim.players[1].position, [4, 3]);
+  let events = sim.step([{ type: "freeze" }, null]);
+  assert.equal(events.some((event) => event.type === "skill" && event.action === "failed" && event.reason === "cooldown"), true);
+  assert.equal(sim.snapshotFor(0).me.skill.remainingCooldownFrames, 0);
+
+  events = sim.step([{ type: "freeze" }, null]);
+  assert.equal(events.some((event) => event.type === "skill" && event.action === "cast" && event.skillType === "freeze"), true);
 }
 
 function testGlobalDebuffSkillsApplyThroughDistanceAndWalls() {
