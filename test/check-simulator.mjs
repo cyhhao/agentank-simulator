@@ -67,6 +67,8 @@ testEnemyBulletVisibilityUsesForwardCone();
 testEnemyBulletVisibilityIsBlockedByTerrain();
 testSeededStarSpawnIsDeterministic();
 testDefaultStarCollectionDoesNotEndMatch();
+testStarRespawnsTenFramesAfterCollection();
+testClonePreservesSeededPendingStarRespawn();
 testConfiguredWinningStarDoesNotSpawnReplacement();
 testDoubleKillTieBreaksByStarsThenRuntime();
 testDoubleKillTieBreaksByRuntimeWhenStarsTie();
@@ -1146,9 +1148,60 @@ function testDefaultStarCollectionDoesNotEndMatch() {
   });
   const events = sim.step([{ type: "go" }, null]);
   assert.equal(sim.result, null);
-  assert.equal(spawnCount, 1);
+  assert.equal(spawnCount, 0);
   assert.equal(events.some((event) => event.type === "star" && event.action === "collected"), true);
+  assert.equal(sim.star, null);
+}
+
+function testStarRespawnsTenFramesAfterCollection() {
+  const providerFrames = [];
+  const sim = new AgenTankSimulator({
+    star: [2, 1],
+    map: openMap(7, 5),
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "teleport" },
+      { id: "b", position: [5, 3], direction: "left", skillType: "overload" }
+    ],
+    starProvider({ frame }) {
+      providerFrames.push(frame);
+      return [3, 1];
+    }
+  });
+
+  sim.step([{ type: "go" }, null]);
+  for (let frame = 1; frame < 10; frame += 1) {
+    const events = sim.step([null, null]);
+    assert.equal(events.some((event) => event.type === "star" && event.action === "created"), false);
+    assert.equal(sim.star, null);
+  }
+  const respawnEvents = sim.step([null, null]);
+  assert.deepEqual(providerFrames, [10]);
   assert.deepEqual(sim.star, [3, 1]);
+  assert.deepEqual(
+    respawnEvents.find((event) => event.type === "star" && event.action === "created"),
+    { type: "star", action: "created", position: [3, 1] }
+  );
+}
+
+function testClonePreservesSeededPendingStarRespawn() {
+  const sim = new AgenTankSimulator({
+    seed: 42,
+    star: [2, 1],
+    map: openMap(7, 5),
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "teleport" },
+      { id: "b", position: [5, 3], direction: "left", skillType: "overload" }
+    ]
+  });
+
+  sim.step([{ type: "go" }, null]);
+  const copy = sim.clone();
+  while (sim.frame <= sim.nextStarSpawnFrame) {
+    sim.step([null, null]);
+    copy.step([null, null]);
+  }
+
+  assert.deepEqual(copy.star, sim.star);
 }
 
 function testConfiguredWinningStarDoesNotSpawnReplacement() {

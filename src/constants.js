@@ -30,6 +30,7 @@ export const SKILL_DURATION_FRAMES = {
 
 export const DEFAULT_MAX_FRAMES = 300;
 export const DEFAULT_STAR_LIMIT = null;
+export const STAR_RESPAWN_DELAY_FRAMES = 10;
 export const BULLET_STEPS_PER_FRAME = 2;
 export const BOMB_FUSE_FRAMES = 10;
 export const BOMB_COOLDOWN_FRAMES = 10;
