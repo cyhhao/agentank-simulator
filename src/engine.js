@@ -157,7 +157,7 @@ export class AgenTankSimulator {
         if (!pending) {
           const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
           if (!decision.action) return decision;
-          pending = createPendingDecision(decision);
+          pending = createPendingDecision(decision, hasActiveSelfEffect(player, "boost", this.frame));
           pendingDecisions[index] = pending;
         }
         return schedulePendingDecision(pending, player, this.frame);
@@ -180,7 +180,7 @@ export class AgenTankSimulator {
         if (!pending) {
           const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
           if (!decision.action) return decision;
-          pending = createPendingDecision(decision);
+          pending = createPendingDecision(decision, hasActiveSelfEffect(player, "boost", this.frame));
           pendingDecisions[index] = pending;
         }
         return schedulePendingDecision(pending, player, this.frame);
@@ -821,9 +821,9 @@ function normalizeDecision(decision) {
     : { action: null, logs: [], runtimeMs: 0 };
 }
 
-function createPendingDecision(decision) {
+function createPendingDecision(decision, decomposeCompoundAction) {
   return {
-    actions: primitiveActionsFor(decision.action),
+    actions: primitiveActionsFor(decision.action, decomposeCompoundAction),
     decision,
     logsPending: true,
     runtimePending: true,
@@ -831,8 +831,11 @@ function createPendingDecision(decision) {
   };
 }
 
-function primitiveActionsFor(action) {
-  if (action?.type !== "turnFire" && action?.type !== "turnGo") return action ? [{ ...action }] : [];
+function primitiveActionsFor(action, decomposeCompoundAction) {
+  if (
+    !decomposeCompoundAction
+    || (action?.type !== "turnFire" && action?.type !== "turnGo")
+  ) return action ? [{ ...action }] : [];
   const reason = action.reason ? { reason: action.reason } : {};
   return [
     { type: "turn", side: action.side === "left" ? "left" : "right", ...reason },

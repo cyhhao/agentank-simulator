@@ -43,6 +43,8 @@ testBoostedBotRunnerCompactsTurnThenFire();
 testBotRunnerDoesNotCompactOnExpiredBoostSnapshot();
 testRunPreservesQueuedActionDuringFreeze();
 await testAsyncRunPreservesQueuedActionDuringFreeze();
+testRunRejectsUnboostedCompoundActions();
+await testAsyncRunRejectsUnboostedCompoundActions();
 testRunReschedulesFrozenBoostCommandsAgainstCurrentState();
 await testAsyncRunReschedulesFrozenBoostCommandsAgainstCurrentState();
 await testBotTimeoutDoesNotHang();
@@ -571,6 +573,56 @@ function assertFreezeQueueReplay(replay, sim) {
   assert.equal(records[2].some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), true);
   assert.equal(records[3].some((event) => event.type === "bullet" && event.tank?.id === "b" && event.action === "created"), true);
   assert.equal(sim.players[1].direction, "left");
+}
+
+function testRunRejectsUnboostedCompoundActions() {
+  for (const type of ["turnGo", "turnFire"]) {
+    const { sim, bot } = unboostedCompoundMatch(type);
+    const replay = sim.run(bot, null);
+    assertUnboostedCompoundActionRejected(replay, sim, bot);
+  }
+}
+
+async function testAsyncRunRejectsUnboostedCompoundActions() {
+  for (const type of ["turnGo", "turnFire"]) {
+    const { sim, bot } = unboostedCompoundMatch(type);
+    const replay = await sim.runAsync(bot, null);
+    assertUnboostedCompoundActionRejected(replay, sim, bot);
+  }
+}
+
+function unboostedCompoundMatch(type) {
+  const sim = new AgenTankSimulator({
+    maxFrames: 2,
+    map: openMap(9, 7),
+    tanks: [
+      { id: "a", position: [2, 3], direction: "right", skillType: "boost" },
+      { id: "b", position: [7, 5], direction: "left", skillType: "cloak" }
+    ]
+  });
+  let calls = 0;
+  const bot = {
+    decide() {
+      const action = calls === 0 ? { type, side: "left" } : null;
+      calls += 1;
+      return { action, logs: [], runtimeMs: 0 };
+    },
+    get calls() {
+      return calls;
+    }
+  };
+  return { sim, bot };
+}
+
+function assertUnboostedCompoundActionRejected(replay, sim, bot) {
+  const events = replay.replayData.replay.records.flat();
+  assert.equal(bot.calls, 2);
+  assert.equal(events.some((event) => event.type === "tank" && event.objectId === "a" && event.action === "turn"), false);
+  assert.equal(events.some((event) => event.type === "tank" && event.objectId === "a" && event.action === "go"), false);
+  assert.equal(events.some((event) => event.type === "bullet" && event.tank?.id === "a" && event.action === "created"), false);
+  assert.equal(sim.players[0].direction, "right");
+  assert.deepEqual(sim.players[0].position, [2, 3]);
+  assert.equal(sim.bullets.length, 0);
 }
 
 function testRunReschedulesFrozenBoostCommandsAgainstCurrentState() {
