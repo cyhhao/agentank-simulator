@@ -69,7 +69,7 @@ export class AgenTankSimulator {
     copy.maxFrames = this.maxFrames;
     copy.starLimit = this.starLimit;
     copy.starProvider = options.starProvider === undefined ? this.starProvider : options.starProvider;
-    copy.rng = options.rng || (() => 0.5);
+    copy.rng = options.rng || cloneRandomSource(this.rng);
     copy.initialStar = this.initialStar ? this.initialStar.slice() : null;
     copy.star = this.star ? this.star.slice() : null;
     copy.nextStarSpawnFrame = this.nextStarSpawnFrame;
@@ -1173,8 +1173,14 @@ function overloadSpreadOffset(direction) {
 
 function seededRandom(seed) {
   let state = Number(seed) >>> 0;
-  return () => {
+  const rng = () => {
     state = (state * 1664525 + 1013904223) >>> 0;
     return state / 0x100000000;
   };
+  rng.clone = () => seededRandom(state);
+  return rng;
+}
+
+function cloneRandomSource(rng) {
+  return typeof rng?.clone === "function" ? rng.clone() : () => 0.5;
 }

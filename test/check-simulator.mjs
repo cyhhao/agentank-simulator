@@ -68,6 +68,7 @@ testEnemyBulletVisibilityIsBlockedByTerrain();
 testSeededStarSpawnIsDeterministic();
 testDefaultStarCollectionDoesNotEndMatch();
 testStarRespawnsTenFramesAfterCollection();
+testClonePreservesSeededPendingStarRespawn();
 testConfiguredWinningStarDoesNotSpawnReplacement();
 testDoubleKillTieBreaksByStarsThenRuntime();
 testDoubleKillTieBreaksByRuntimeWhenStarsTie();
@@ -1180,6 +1181,27 @@ function testStarRespawnsTenFramesAfterCollection() {
     respawnEvents.find((event) => event.type === "star" && event.action === "created"),
     { type: "star", action: "created", position: [3, 1] }
   );
+}
+
+function testClonePreservesSeededPendingStarRespawn() {
+  const sim = new AgenTankSimulator({
+    seed: 42,
+    star: [2, 1],
+    map: openMap(7, 5),
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "teleport" },
+      { id: "b", position: [5, 3], direction: "left", skillType: "overload" }
+    ]
+  });
+
+  sim.step([{ type: "go" }, null]);
+  const copy = sim.clone();
+  while (sim.frame <= sim.nextStarSpawnFrame) {
+    sim.step([null, null]);
+    copy.step([null, null]);
+  }
+
+  assert.deepEqual(copy.star, sim.star);
 }
 
 function testConfiguredWinningStarDoesNotSpawnReplacement() {
