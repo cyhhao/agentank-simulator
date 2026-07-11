@@ -54,6 +54,7 @@ export class AgenTankSimulator {
     this.bullets = [];
     this.bombs = [];
     this.pendingStarEvents = [];
+    this.lastFrameDecisionObserved = [false, false];
     this.lastFrameActionSlotResolved = [false, false];
     if (this.star) this.pendingStarEvents.push({ type: "star", action: "created", position: this.star.slice() });
   }
@@ -76,6 +77,7 @@ export class AgenTankSimulator {
     copy.bullets = this.bullets.map((bullet) => ({ ...bullet, position: bullet.position.slice() }));
     copy.bombs = this.bombs.map((bomb) => ({ ...bomb, position: bomb.position.slice() }));
     copy.pendingStarEvents = this.pendingStarEvents.map((event) => cloneEvent(event));
+    copy.lastFrameDecisionObserved = this.lastFrameDecisionObserved.slice();
     copy.lastFrameActionSlotResolved = this.lastFrameActionSlotResolved.slice();
     return copy;
   }
@@ -151,13 +153,17 @@ export class AgenTankSimulator {
       const decisions = bots.map((bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        if (pendingDecisions[index]) return pendingDecisions[index];
-        const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
-        if (decision.action) pendingDecisions[index] = decision;
-        return decision;
+        let pending = pendingDecisions[index];
+        if (!pending) {
+          const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
+          if (!decision.action) return decision;
+          pending = createPendingDecision(decision);
+          pendingDecisions[index] = pending;
+        }
+        return schedulePendingDecision(pending, player, this.frame);
       });
       this.step(decisions.map((item) => item.action), decisions);
-      settlePendingDecisions(this, pendingDecisions, decisions);
+      settlePendingDecisions(this, pendingDecisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
@@ -170,13 +176,17 @@ export class AgenTankSimulator {
       const decisions = await Promise.all(bots.map(async (bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        if (pendingDecisions[index]) return pendingDecisions[index];
-        const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
-        if (decision.action) pendingDecisions[index] = decision;
-        return decision;
+        let pending = pendingDecisions[index];
+        if (!pending) {
+          const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
+          if (!decision.action) return decision;
+          pending = createPendingDecision(decision);
+          pendingDecisions[index] = pending;
+        }
+        return schedulePendingDecision(pending, player, this.frame);
       }));
       this.step(decisions.map((item) => item.action), decisions);
-      settlePendingDecisions(this, pendingDecisions, decisions);
+      settlePendingDecisions(this, pendingDecisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
@@ -184,6 +194,7 @@ export class AgenTankSimulator {
 
   step(actions = [], decisions = []) {
     if (this.result) return [];
+    this.lastFrameDecisionObserved = [false, false];
     this.lastFrameActionSlotResolved = [false, false];
     const frameEvents = [];
     frameEvents.push(...this.pendingStarEvents);
@@ -215,6 +226,7 @@ export class AgenTankSimulator {
 
     for (const index of [0, 1]) {
       const decision = decisions[index] || {};
+      this.lastFrameDecisionObserved[index] = true;
       for (const log of decision.logs || []) {
         if (log.type === "speak") {
           frameEvents.push({
@@ -809,17 +821,69 @@ function normalizeDecision(decision) {
     : { action: null, logs: [], runtimeMs: 0 };
 }
 
-function settlePendingDecisions(simulator, pendingDecisions, decisions) {
+function createPendingDecision(decision) {
+  return {
+    actions: primitiveActionsFor(decision.action),
+    decision,
+    logsPending: true,
+    runtimePending: true,
+    scheduledActionCount: 0
+  };
+}
+
+function primitiveActionsFor(action) {
+  if (action?.type !== "turnFire" && action?.type !== "turnGo") return action ? [{ ...action }] : [];
+  const reason = action.reason ? { reason: action.reason } : {};
+  return [
+    { type: "turn", side: action.side === "left" ? "left" : "right", ...reason },
+    { type: action.type === "turnFire" ? "fire" : "go", ...reason }
+  ];
+}
+
+function schedulePendingDecision(pending, player, frame) {
+  const first = pending.actions[0] || null;
+  const second = pending.actions[1] || null;
+  let action = first;
+  let actionCount = first ? 1 : 0;
+  if (
+    first?.type === "turn"
+    && (second?.type === "fire" || second?.type === "go")
+    && hasActiveSelfEffect(player, "boost", frame)
+  ) {
+    action = {
+      type: second.type === "fire" ? "turnFire" : "turnGo",
+      side: first.side === "left" ? "left" : "right"
+    };
+    const reason = first.reason || second.reason;
+    if (reason) action.reason = reason;
+    actionCount = 2;
+  }
+  pending.scheduledActionCount = actionCount;
+  return {
+    ...pending.decision,
+    action,
+    logs: pending.logsPending ? pending.decision.logs || [] : [],
+    runtimeMs: pending.runtimePending ? Number(pending.decision.runtimeMs || 0) : 0
+  };
+}
+
+function settlePendingDecisions(simulator, pendingDecisions) {
   for (const index of [0, 1]) {
     const pending = pendingDecisions[index];
     if (!pending) continue;
-    if (simulator.lastFrameActionSlotResolved[index] || simulator.players[index].crashed) {
+    if (simulator.players[index].crashed) {
       pendingDecisions[index] = null;
       continue;
     }
-    if (decisions[index] === pending && pending.logs?.length) {
-      pendingDecisions[index] = { ...pending, logs: [] };
+    if (simulator.lastFrameActionSlotResolved[index]) {
+      pending.actions.splice(0, pending.scheduledActionCount);
+      pending.logsPending = false;
+      pending.runtimePending = false;
+      if (pending.actions.length === 0) pendingDecisions[index] = null;
+    } else if (simulator.lastFrameDecisionObserved[index]) {
+      pending.logsPending = false;
     }
+    pending.scheduledActionCount = 0;
   }
 }
 

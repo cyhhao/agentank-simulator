@@ -312,6 +312,7 @@ try {
 - bot runner 支持动作队列。
 - 非 boost 状态下，动作队列每帧只执行一个动作；例如同一次 `onIdle` 里的 `turn(); fire();` 会分帧执行。
 - freeze 只会暂停动作队列，不会丢弃已经排队的命令；冻结结束后继续执行。
+- 恢复执行时按当时生效的效果重新调度，因此已过期的 boost 不会保留陈旧的 `turnFire` 或 `turnGo`。
 - boost 状态下，同一次 `onIdle` 里 `turn(); fire();` 会合并为同帧 `turnFire`，`turn(); go();` 会合并为 `turnGo`。
 
 地形：

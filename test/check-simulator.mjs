@@ -43,6 +43,8 @@ testBoostedBotRunnerCompactsTurnThenFire();
 testBotRunnerDoesNotCompactOnExpiredBoostSnapshot();
 testRunPreservesQueuedActionDuringFreeze();
 await testAsyncRunPreservesQueuedActionDuringFreeze();
+testRunReschedulesFrozenBoostCommandsAgainstCurrentState();
+await testAsyncRunReschedulesFrozenBoostCommandsAgainstCurrentState();
 await testBotTimeoutDoesNotHang();
 testAsyncBotTimeoutDoesNotHang();
 await testAsyncBotRejectionReturnsErrorDecision();
@@ -569,6 +571,69 @@ function assertFreezeQueueReplay(replay, sim) {
   assert.equal(records[2].some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), true);
   assert.equal(records[3].some((event) => event.type === "bullet" && event.tank?.id === "b" && event.action === "created"), true);
   assert.equal(sim.players[1].direction, "left");
+}
+
+function testRunReschedulesFrozenBoostCommandsAgainstCurrentState() {
+  const expired = frozenBoostQueueMatch("fire", 5, 9);
+  const expiredReplay = expired.sim.run(expired.freezer, expired.target);
+  assertExpiredBoostQueueResumesAsSeparateActions(expiredReplay, expired.sim, "fire");
+
+  const active = frozenBoostQueueMatch("fire", 2, 5);
+  const activeReplay = active.sim.run(active.freezer, active.target);
+  const events = activeReplay.replayData.replay.records[4];
+  assert.equal(events.some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), true);
+  assert.equal(events.some((event) => event.type === "bullet" && event.tank?.id === "b" && event.action === "created"), true);
+}
+
+async function testAsyncRunReschedulesFrozenBoostCommandsAgainstCurrentState() {
+  const expired = frozenBoostQueueMatch("go", 5, 9);
+  const replay = await expired.sim.runAsync(expired.freezer, expired.target);
+  assertExpiredBoostQueueResumesAsSeparateActions(replay, expired.sim, "go");
+}
+
+function frozenBoostQueueMatch(followup, freezeFrame, maxFrames) {
+  const sim = new AgenTankSimulator({
+    maxFrames,
+    map: openMap(12, 9),
+    tanks: [
+      { id: "a", position: [1, 1], direction: "right", skillType: "freeze" },
+      { id: "b", position: [9, 4], direction: "left", skillType: "boost" }
+    ]
+  });
+  sim.step([null, { type: "boost" }]);
+  while (sim.frame < freezeFrame) sim.step([null, null]);
+
+  let cast = false;
+  const freezer = {
+    decide() {
+      const action = cast ? null : { type: "freeze" };
+      cast = true;
+      return { action, logs: [], runtimeMs: 0 };
+    }
+  };
+  const target = loadBotFromCode(`
+    function onIdle(me) {
+      me.speak("boost-idle");
+      me.turn("left");
+      me.${followup}();
+    }
+  `);
+  return { sim, freezer, target };
+}
+
+function assertExpiredBoostQueueResumesAsSeparateActions(replay, sim, followup) {
+  const records = replay.replayData.replay.records;
+  const thawEvents = records[7];
+  const followupEvents = records[8];
+  const speechEvents = records.flat().filter((event) => event.type === "speech" && event.objectId === "b");
+  assert.equal(speechEvents.length, 1);
+  assert.equal(thawEvents.some((event) => event.type === "tank" && event.objectId === "b" && event.action === "turn"), true);
+  if (followup === "fire") {
+    assert.equal(followupEvents.some((event) => event.type === "bullet" && event.tank?.id === "b" && event.action === "created"), true);
+  } else {
+    assert.equal(followupEvents.some((event) => event.type === "tank" && event.objectId === "b" && event.action === "go"), true);
+    assert.deepEqual(sim.players[1].position, [9, 5]);
+  }
 }
 
 async function testBotTimeoutDoesNotHang() {

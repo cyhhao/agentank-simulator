@@ -312,6 +312,7 @@ Frame and actions:
 - Action queues are supported by the bot runner.
 - Outside boost, the action queue executes one action per frame; for example, `turn(); fire();` in one `onIdle` call is queued across frames.
 - Freeze pauses queued commands instead of discarding them; execution resumes after freeze expires.
+- Resumed commands use the effects active when they execute, so an expired boost cannot preserve a stale `turnFire` or `turnGo`.
 - While boosted, `turn(); fire();` in one `onIdle` call compacts into same-frame `turnFire`, and `turn(); go();` compacts into `turnGo`.
 
 Terrain:
