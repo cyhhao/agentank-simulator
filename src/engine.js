@@ -54,6 +54,8 @@ export class AgenTankSimulator {
     this.bullets = [];
     this.bombs = [];
     this.pendingStarEvents = [];
+    this.lastFrameDecisionObserved = [false, false];
+    this.lastFrameActionSlotResolved = [false, false];
     if (this.star) this.pendingStarEvents.push({ type: "star", action: "created", position: this.star.slice() });
   }
 
@@ -75,6 +77,8 @@ export class AgenTankSimulator {
     copy.bullets = this.bullets.map((bullet) => ({ ...bullet, position: bullet.position.slice() }));
     copy.bombs = this.bombs.map((bomb) => ({ ...bomb, position: bomb.position.slice() }));
     copy.pendingStarEvents = this.pendingStarEvents.map((event) => cloneEvent(event));
+    copy.lastFrameDecisionObserved = this.lastFrameDecisionObserved.slice();
+    copy.lastFrameActionSlotResolved = this.lastFrameActionSlotResolved.slice();
     return copy;
   }
 
@@ -143,26 +147,46 @@ export class AgenTankSimulator {
   }
 
   run(botA, botB) {
+    const bots = [botA, botB];
+    const pendingDecisions = [null, null];
     while (!this.result && this.frame < this.maxFrames) {
-      const decisions = [botA, botB].map((bot, index) => {
+      const decisions = bots.map((bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        return bot.decide(this.snapshotFor(index));
+        let pending = pendingDecisions[index];
+        if (!pending) {
+          const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
+          if (!decision.action) return decision;
+          pending = createPendingDecision(decision, hasActiveSelfEffect(player, "boost", this.frame));
+          pendingDecisions[index] = pending;
+        }
+        return schedulePendingDecision(pending, player, this.frame);
       });
       this.step(decisions.map((item) => item.action), decisions);
+      settlePendingDecisions(this, pendingDecisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
   }
 
   async runAsync(botA, botB) {
+    const bots = [botA, botB];
+    const pendingDecisions = [null, null];
     while (!this.result && this.frame < this.maxFrames) {
-      const decisions = await Promise.all([botA, botB].map((bot, index) => {
+      const decisions = await Promise.all(bots.map(async (bot, index) => {
         const player = this.players[index];
         if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
-        return bot.decide(this.snapshotFor(index));
+        let pending = pendingDecisions[index];
+        if (!pending) {
+          const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
+          if (!decision.action) return decision;
+          pending = createPendingDecision(decision, hasActiveSelfEffect(player, "boost", this.frame));
+          pendingDecisions[index] = pending;
+        }
+        return schedulePendingDecision(pending, player, this.frame);
       }));
       this.step(decisions.map((item) => item.action), decisions);
+      settlePendingDecisions(this, pendingDecisions);
     }
     if (!this.result) this.finishByScore();
     return this.toReplayData();
@@ -170,6 +194,8 @@ export class AgenTankSimulator {
 
   step(actions = [], decisions = []) {
     if (this.result) return [];
+    this.lastFrameDecisionObserved = [false, false];
+    this.lastFrameActionSlotResolved = [false, false];
     const frameEvents = [];
     frameEvents.push(...this.pendingStarEvents);
     this.pendingStarEvents = [];
@@ -200,6 +226,7 @@ export class AgenTankSimulator {
 
     for (const index of [0, 1]) {
       const decision = decisions[index] || {};
+      this.lastFrameDecisionObserved[index] = true;
       for (const log of decision.logs || []) {
         if (log.type === "speak") {
           frameEvents.push({
@@ -213,6 +240,7 @@ export class AgenTankSimulator {
       }
       const player = this.players[index];
       if (player.crashed || !canActThisFrame(player, this.frame)) continue;
+      this.lastFrameActionSlotResolved[index] = true;
       player.runTimeMs += Number(decision.runtimeMs || 0);
       this.applyPlayerAction(player, actions[index], frameEvents, moveIntentByIndex, startPositions);
       this.collectStar(player, frameEvents);
@@ -434,9 +462,20 @@ export class AgenTankSimulator {
 
   applySkill(player, action, events) {
     const type = action.type;
-    if (player.skillType !== type || player.skillCooldownUntil > this.frame) return;
+    if (player.skillType !== type) return;
+    if (player.skillCooldownUntil > this.frame) {
+      events.push({
+        type: "skill",
+        action: "failed",
+        by: player.index,
+        skillType: type,
+        reason: "cooldown",
+        sourceObjectId: player.objectId
+      });
+      return;
+    }
     player.skillCooldownFrames = SKILL_COOLDOWN_FRAMES[type] || 32;
-    player.skillCooldownUntil = this.frame + player.skillCooldownFrames + 1;
+    player.skillCooldownUntil = skillReadyFrame(type, this.frame, player.skillCooldownFrames);
     events.push({ type: "skill", action: "cast", by: player.index, skillType: type, sourceObjectId: player.objectId });
 
     if (type === "teleport") {
@@ -472,7 +511,12 @@ export class AgenTankSimulator {
       const enemy = this.players[player.index === 0 ? 1 : 0];
       const duration = SKILL_DURATION_FRAMES[type] || 0;
       if (!duration || enemy.crashed) return;
-      const expiresAt = this.frame + duration + (type === "stun" ? 1 : 0);
+      // If the target already resolved this frame, freeze must cover the next
+      // two action slots instead of counting the completed slot as frame one.
+      const resolvedCurrentAction = Boolean(this.lastFrameActionSlotResolved[enemy.index]);
+      const expiresAt = this.frame + duration
+        + (type === "stun" ? 1 : 0)
+        + (type === "freeze" && resolvedCurrentAction ? 1 : 0);
       enemy.effects.debuff = { type, expiresAt };
       events.push({
         type: "skill",
@@ -769,6 +813,87 @@ function normalizeStarLimit(value) {
   if (value == null || value === false) return DEFAULT_STAR_LIMIT;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_STAR_LIMIT;
+}
+
+function normalizeDecision(decision) {
+  return decision && typeof decision === "object"
+    ? decision
+    : { action: null, logs: [], runtimeMs: 0 };
+}
+
+function createPendingDecision(decision, decomposeCompoundAction) {
+  return {
+    actions: primitiveActionsFor(decision.action, decomposeCompoundAction),
+    decision,
+    logsPending: true,
+    runtimePending: true,
+    scheduledActionCount: 0
+  };
+}
+
+function primitiveActionsFor(action, decomposeCompoundAction) {
+  if (
+    !decomposeCompoundAction
+    || (action?.type !== "turnFire" && action?.type !== "turnGo")
+  ) return action ? [{ ...action }] : [];
+  const reason = action.reason ? { reason: action.reason } : {};
+  return [
+    { type: "turn", side: action.side === "left" ? "left" : "right", ...reason },
+    { type: action.type === "turnFire" ? "fire" : "go", ...reason }
+  ];
+}
+
+function schedulePendingDecision(pending, player, frame) {
+  const first = pending.actions[0] || null;
+  const second = pending.actions[1] || null;
+  let action = first;
+  let actionCount = first ? 1 : 0;
+  if (
+    first?.type === "turn"
+    && (second?.type === "fire" || second?.type === "go")
+    && hasActiveSelfEffect(player, "boost", frame)
+  ) {
+    action = {
+      type: second.type === "fire" ? "turnFire" : "turnGo",
+      side: first.side === "left" ? "left" : "right"
+    };
+    const reason = first.reason || second.reason;
+    if (reason) action.reason = reason;
+    actionCount = 2;
+  }
+  pending.scheduledActionCount = actionCount;
+  return {
+    ...pending.decision,
+    action,
+    logs: pending.logsPending ? pending.decision.logs || [] : [],
+    runtimeMs: pending.runtimePending ? Number(pending.decision.runtimeMs || 0) : 0
+  };
+}
+
+function settlePendingDecisions(simulator, pendingDecisions) {
+  for (const index of [0, 1]) {
+    const pending = pendingDecisions[index];
+    if (!pending) continue;
+    if (simulator.players[index].crashed) {
+      pendingDecisions[index] = null;
+      continue;
+    }
+    if (simulator.lastFrameActionSlotResolved[index]) {
+      pending.actions.splice(0, pending.scheduledActionCount);
+      pending.logsPending = false;
+      pending.runtimePending = false;
+      if (pending.actions.length === 0) pendingDecisions[index] = null;
+    } else if (simulator.lastFrameDecisionObserved[index]) {
+      pending.logsPending = false;
+    }
+    pending.scheduledActionCount = 0;
+  }
+}
+
+function skillReadyFrame(type, castFrame, cooldownFrames) {
+  // Official replays allow freeze again at F+29. Other skills retain their
+  // existing inclusive post-cast cooldown boundary.
+  return castFrame + cooldownFrames + (type === "freeze" ? 0 : 1);
 }
 
 function clonePlayer(player) {
