@@ -43,6 +43,8 @@ testBoostedBotRunnerCompactsTurnThenFire();
 testBotRunnerDoesNotCompactOnExpiredBoostSnapshot();
 testRunPreservesQueuedActionDuringFreeze();
 await testAsyncRunPreservesQueuedActionDuringFreeze();
+testRunQueuesFreshDecisionWhileFrozen();
+await testAsyncRunQueuesFreshDecisionWhileFrozen();
 testRunRejectsUnboostedCompoundActions();
 await testAsyncRunRejectsUnboostedCompoundActions();
 testRunReschedulesFrozenBoostCommandsAgainstCurrentState();
@@ -577,6 +579,65 @@ function assertFreezeQueueReplay(replay, sim) {
   assert.equal(sim.players[1].direction, "left");
 }
 
+function testRunQueuesFreshDecisionWhileFrozen() {
+  const match = freshFreezeQueueMatch();
+  const replay = match.sim.run(match.target, match.freezer);
+  assertFreshFreezeQueueReplay(replay, match);
+}
+
+async function testAsyncRunQueuesFreshDecisionWhileFrozen() {
+  const match = freshFreezeQueueMatch();
+  const replay = await match.sim.runAsync(match.target, match.freezer);
+  assertFreshFreezeQueueReplay(replay, match);
+}
+
+function freshFreezeQueueMatch() {
+  const sim = new AgenTankSimulator({
+    maxFrames: 3,
+    map: openMap(10, 7),
+    tanks: [
+      { id: "target", position: [5, 3], direction: "up", skillType: "cloak" },
+      { id: "freezer", position: [1, 3], direction: "right", skillType: "freeze" }
+    ]
+  });
+  const calls = [];
+  const target = {
+    decide(snapshot) {
+      calls.push(snapshot.game.frames);
+      const first = calls.length === 1;
+      return {
+        action: first ? { type: "turn", side: "left" } : { type: "go" },
+        logs: [{ type: "speak", data: `decision-${snapshot.game.frames}` }],
+        runtimeMs: first ? 2 : 3
+      };
+    }
+  };
+  let cast = false;
+  const freezer = {
+    decide() {
+      const action = cast ? null : { type: "freeze" };
+      cast = true;
+      return { action, logs: [], runtimeMs: 0 };
+    }
+  };
+  return { sim, target, freezer, calls };
+}
+
+function assertFreshFreezeQueueReplay(replay, match) {
+  const records = replay.replayData.replay.records;
+  assert.deepEqual(match.calls, [0, 1]);
+  assert.equal(records[0].some((event) => event.type === "tank" && event.objectId === "target" && event.action === "turn"), true);
+  assert.equal(records[1].some((event) => event.type === "tank" && event.objectId === "target" && event.action === "go"), false);
+  assert.equal(records[2].some((event) => event.type === "skill" && event.action === "expired" && event.skillType === "freeze"), true);
+  assert.equal(records[2].some((event) => event.type === "tank" && event.objectId === "target" && event.action === "go"), true);
+  assert.deepEqual(match.sim.players[0].position, [4, 3]);
+  assert.equal(match.sim.players[0].runTimeMs, 5);
+  const speechFrames = records.flatMap((events, frame) => events
+    .filter((event) => event.type === "speech" && event.objectId === "target")
+    .map(() => frame));
+  assert.deepEqual(speechFrames, [0, 1]);
+}
+
 function testRunRejectsUnboostedCompoundActions() {
   for (const type of ["turnGo", "turnFire"]) {
     const { sim, bot } = unboostedCompoundMatch(type);
@@ -813,7 +874,7 @@ function testCloakedTankCanStillBeShot() {
 
 function testFreezeControlsEnemyForTwoFrames() {
   assert.deepEqual(freezeTargetActionsByFrame(0), [false, false, true, true]);
-  assert.deepEqual(freezeTargetActionsByFrame(1), [true, false, false, true]);
+  assert.deepEqual(freezeTargetActionsByFrame(1), [true, false, true, true]);
 }
 
 function freezeTargetActionsByFrame(casterIndex) {

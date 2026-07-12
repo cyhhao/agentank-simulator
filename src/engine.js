@@ -155,7 +155,7 @@ export class AgenTankSimulator {
     while (!this.result && this.frame < this.maxFrames) {
       const decisions = bots.map((bot, index) => {
         const player = this.players[index];
-        if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
+        if (!bot || player.crashed || !canPollBotThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
         let pending = pendingDecisions[index];
         if (!pending) {
           const decision = normalizeDecision(bot.decide(this.snapshotFor(index)));
@@ -178,7 +178,7 @@ export class AgenTankSimulator {
     while (!this.result && this.frame < this.maxFrames) {
       const decisions = await Promise.all(bots.map(async (bot, index) => {
         const player = this.players[index];
-        if (!bot || player.crashed || !canActThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
+        if (!bot || player.crashed || !canPollBotThisFrame(player, this.frame)) return { action: null, logs: [], runtimeMs: 0 };
         let pending = pendingDecisions[index];
         if (!pending) {
           const decision = normalizeDecision(await bot.decide(this.snapshotFor(index)));
@@ -242,9 +242,10 @@ export class AgenTankSimulator {
         }
       }
       const player = this.players[index];
-      if (player.crashed || !canActThisFrame(player, this.frame)) continue;
-      this.lastFrameActionSlotResolved[index] = true;
+      if (player.crashed) continue;
       player.runTimeMs += Number(decision.runtimeMs || 0);
+      if (!canActThisFrame(player, this.frame)) continue;
+      this.lastFrameActionSlotResolved[index] = true;
       this.applyPlayerAction(player, actions[index], frameEvents, moveIntentByIndex, startPositions);
       this.collectStar(player, frameEvents);
       this.checkTankCollision(frameEvents);
@@ -514,12 +515,8 @@ export class AgenTankSimulator {
       const enemy = this.players[player.index === 0 ? 1 : 0];
       const duration = SKILL_DURATION_FRAMES[type] || 0;
       if (!duration || enemy.crashed) return;
-      // If the target already resolved this frame, freeze must cover the next
-      // two action slots instead of counting the completed slot as frame one.
-      const resolvedCurrentAction = Boolean(this.lastFrameActionSlotResolved[enemy.index]);
       const expiresAt = this.frame + duration
-        + (type === "stun" ? 1 : 0)
-        + (type === "freeze" && resolvedCurrentAction ? 1 : 0);
+        + (type === "stun" ? 1 : 0);
       enemy.effects.debuff = { type, expiresAt };
       events.push({
         type: "skill",
@@ -889,6 +886,7 @@ function settlePendingDecisions(simulator, pendingDecisions) {
       if (pending.actions.length === 0) pendingDecisions[index] = null;
     } else if (simulator.lastFrameDecisionObserved[index]) {
       pending.logsPending = false;
+      pending.runtimePending = false;
     }
     pending.scheduledActionCount = 0;
   }
@@ -975,6 +973,10 @@ function canActThisFrame(player, frame) {
   if (isControlled(player, frame)) return false;
   if (hasActiveDebuffEffect(player, "poison", frame)) return frame % 2 === 0;
   return true;
+}
+
+function canPollBotThisFrame(player, frame) {
+  return canActThisFrame(player, frame) || isControlled(player, frame);
 }
 
 function normalizedActionForPlayer(player, action, frame, rng) {
