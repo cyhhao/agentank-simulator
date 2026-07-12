@@ -311,7 +311,8 @@ Frame and actions:
 - `go`, `turn`, `fire`, `throwBomb`, and skills are single actions.
 - Action queues are supported by the bot runner.
 - Outside boost, the action queue executes one action per frame; for example, `turn(); fire();` in one `onIdle` call is queued across frames.
-- Freeze pauses queued commands instead of discarding them; execution resumes after freeze expires.
+- Freeze pauses command execution instead of discarding commands. If the queue is empty while frozen, the runner can ask the bot for a decision and hold any returned command until freeze expires.
+- Freeze lasts for the cast frame and the following frame. Because player A resolves before player B, a freeze cast by player B does not retroactively suppress player A's action from that cast frame.
 - Resumed commands use the effects active when they execute, so an expired boost cannot preserve a stale `turnFire` or `turnGo`.
 - While boosted, `turn(); fire();` in one `onIdle` call compacts into same-frame `turnFire`, and `turn(); go();` compacts into `turnGo`.
 
@@ -343,7 +344,7 @@ Skills:
 - `overload`: arms a temporary self effect; the next fire creates a spread shot.
 - `cloak`: hides the tank from the opponent while active.
 - `teleport`: moves immediately to a legal target, consumes cooldown on illegal targets, cannot land on tanks or bullets, and lands adjacent when targeting a star.
-- `freeze`: prevents the enemy from acting for 2 frames without discarding queued commands; cooldown is 29 frames.
+- `freeze`: prevents the enemy from acting during the 2 active frames without discarding queued commands; cooldown is 29 frames.
 - `stun`: applies a debuff that can reverse turns or movement.
 - `shield`: blocks two incoming bullet hits before expiring. Bomb hits still consume the shield.
 - `boost`: makes one executed `go()` move up to two cells, stopping at blockers.
